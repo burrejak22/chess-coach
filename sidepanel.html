@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess Coach</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">Chess Coach</div>
+    <div id="status" class="pill off">Starting…</div>
+  </header>
+
+  <nav class="tabs">
+    <button type="button" id="tab-coach" class="tab active">Coach</button>
+    <button type="button" id="tab-openings" class="tab">Openings</button>
+  </nav>
+
+  <div id="page-coach">
+
+  <section id="off" class="card off-card" hidden>
+    <div class="off-title">Coach is off here</div>
+    <p id="off-reason"></p>
+    <p class="muted">It works on analysis boards, studies, finished games, solved Lichess puzzles, and games vs the computer. It turns itself off during live and daily games.</p>
+  </section>
+
+  <main id="on" hidden>
+    <section class="evalrow">
+      <div class="bar"><div id="bar-fill"></div></div>
+      <div class="evaltext">
+        <div id="eval" class="eval">…</div>
+        <div id="turn" class="muted"></div>
+      </div>
+      <div id="thinking" class="muted small"></div>
+    </section>
+
+    <section class="controls">
+      <label>Play like
+        <select id="level">
+          <option value="800">800</option>
+          <option value="1200">1200</option>
+          <option value="1600" selected>1600</option>
+          <option value="2000">2000</option>
+          <option value="2400">2400</option>
+        </select>
+      </label>
+      <label>Think
+        <select id="think">
+          <option value="1000">1s</option>
+          <option value="2500" selected>2.5s</option>
+          <option value="5000">5s</option>
+        </select>
+      </label>
+      <label title="Whose turn it is. Auto reads it from the last-move highlight.">To move
+        <select id="turn-select">
+          <option value="auto" selected>Auto</option>
+          <option value="w">White</option>
+          <option value="b">Black</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="arrows" checked> Arrows</label>
+      <label class="check" title="When there's a tactic, hide the answer until you ask"><input type="checkbox" id="puzzle"> Puzzle mode</label>
+    </section>
+
+    <section id="puzzle-card" class="card puzzle" hidden></section>
+    <section id="opening" class="card opening" hidden></section>
+
+    <section id="review" class="card review" hidden></section>
+    <section id="threat" class="card threat" hidden></section>
+    <section id="human" class="card human" hidden></section>
+    <section id="best" class="card best" hidden></section>
+    <section id="alts" class="card alts" hidden></section>
+  </main>
+  </div>
+
+  <div id="page-openings" hidden></div>
+
+  <footer class="muted small">
+    <div id="engine-name">Engine: starting…</div>
+    <div>For study only. Arrows: <span class="sw human"></span> human move <span class="sw best"></span> engine best <span class="sw threat"></span> their threat</div>
+  </footer>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
