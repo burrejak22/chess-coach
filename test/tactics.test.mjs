@@ -1,5 +1,5 @@
 import { searchPosition } from '../lib/basic-engine.js';
-import { classifyMove, findTactic, temptingReplies, describeTrap, coachPosition, playUci } from '../lib/coach.js';
+import { classifyMove, findTactic, temptingReplies, describeTrap, coachPosition, playUci, materialSwing, explainMove } from '../lib/coach.js';
 
 let fails = 0;
 const check = (name, cond, detail) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${name}${cond ? '' : ` -> ${JSON.stringify(detail)}`}`); if (!cond) fails += 1; };
@@ -38,6 +38,13 @@ const punish = { depth: 20, multipv: 1, scoreCp: 600, mate: null, pv: ['d8g5', '
 const trap = describeTrap(shilling, nd4, replies.find((r) => r.san === 'Nxe5'), punish);
 check('describes the Blackburne Shilling trap', !!trap && trap.text.startsWith('Sets a trap: if they play Nxe5?, Qg5'), { trap });
 console.log('     ', trap?.text);
+
+// a line cut off mid-trade (they took, we haven't taken back yet) isn't a sacrifice
+const midTrade = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2';
+const tradePv = ['b8c6', 'd2d4', 'e5d4', 'f3d4', 'g8f6', 'd4c6', 'b7c6', 'e4e5'];
+check('trade still in progress at the cut-off counts as even', materialSwing(midTrade, tradePv) === 0, materialSwing(midTrade, tradePv));
+check('...and Nc6 is not called a sacrifice', !explainMove(midTrade, { pv: tradePv, scoreCp: -20 }).reasons.some((r) => r.startsWith('A sacrifice')));
+check('...and gets no Brilliant badge', !classifyMove(midTrade, { pv: tradePv, scoreCp: -20 }, [{ pv: tradePv, scoreCp: -20 }], []).includes('Brilliant'));
 
 // coachPosition carries badges & traps through
 const r = coachPosition(recap, { deep: lines(recap), shallow: lines(recap, 3, 1), level: 1600 });

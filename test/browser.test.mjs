@@ -234,6 +234,38 @@ check('trap view opens', /Trap · Italian Game/i.test(trapText) && /Fried Liver/
 if (process.env.SHOT) await panel.screenshot({ path: process.env.SHOT.replace('.png', '-openings.png'), fullPage: true });
 await panel.click('#tab-coach');
 
+// --- accuracy: play 1.e4, then 1...e5 2.Nf3 arrive together (as when the computer replies quickly)
+const idle = () => panel.waitForFunction(() => !/thinking|checking/.test(document.getElementById('thinking').textContent)
+  && !document.getElementById('human').hidden, null, { timeout: 90000 }).catch(() => {});
+const playTo = async (path, fen, lastMove) => {
+  pages.set(`https://lichess.org/analysis/${path}`, lichessPage(fen, { lastMove }));
+  await lichess.goto(`https://lichess.org/analysis/${path}`);
+  await new Promise((r) => setTimeout(r, 400));
+  await idle();
+};
+await playTo('acc0', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', []);
+await playTo('acc1', 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1', ['e2', 'e4']);
+await playTo('acc3', 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2', ['g1', 'f3']);
+await panel.waitForFunction(() => /3 moves/i.test(document.getElementById('accuracy').innerText), null, { timeout: 30000 }).catch(() => {});
+const acc = await panel.evaluate(() => ({
+  hidden: document.getElementById('accuracy').hidden,
+  text: document.getElementById('accuracy').innerText,
+  dots: document.querySelectorAll('#accuracy .dot').length,
+  review: document.getElementById('review').innerText,
+}));
+console.log('\n--- accuracy ---\n', acc.text, '\n', acc.review, '\n');
+check('accuracy card counts all 3 moves, including the 2 that arrived together', !acc.hidden && /3 moves/i.test(acc.text) && acc.dots === 3, acc);
+check('both sides get a percentage', (acc.text.match(/\d+\.\d%/g) || []).length === 2, acc.text);
+check('last move card shows its accuracy', /Nf3/.test(acc.review) && /% accuracy/.test(acc.review), acc.review);
+if (process.env.SHOT) await panel.screenshot({ path: process.env.SHOT.replace('.png', '-accuracy.png'), fullPage: true });
+// stepping back shows the line up to that point, and forward brings it back
+await playTo('acc1', 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1', ['e2', 'e4']);
+const back = await panel.evaluate(() => document.getElementById('accuracy').innerText);
+check('stepping back shows accuracy up to that move', /1 move so far/i.test(back), back);
+await playTo('acc3', 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2', ['g1', 'f3']);
+const fwd = await panel.evaluate(() => document.getElementById('accuracy').innerText);
+check('stepping forward brings the later moves back', /3 moves/i.test(fwd), fwd);
+
 // --- puzzle mode: a free queen is a tactic, so the answer is hidden until asked
 await panel.check('#puzzle');
 const tacticFen = 'rnb1kbnr/pppp1ppp/8/4p1q1/4P3/3P4/PPP2PPP/RNBQKBNR w KQkq - 1 3';

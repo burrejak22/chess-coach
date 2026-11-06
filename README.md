@@ -11,6 +11,11 @@ puzzle, or a game vs the computer, and the side panel shows:
   something) that's worse, with why it's tempting and what goes wrong. Only inaccuracies and mistakes
   (0.6 to 2.5 pawns worse) are shown; game-losing blunders and moves that walk into mate aren't. Turn it off with
   the **Mistakes** checkbox.
+- **Accuracy**: a running score for each side as the game goes (the same idea as Chess.com's and Lichess'
+  accuracy: how much of your winning chances each move kept), with a colored square per move and counts of
+  best / good / inaccuracies / mistakes / blunders. It follows the line on the board: step back and it shows the
+  score up to that move, step forward and the later moves come back. Works while you play the computer and while
+  you go through a game or an analysis line. Like the rest of the coach, it's off during live games.
 - **Last move review**: step through a game and each move gets graded (Best / Good / Inaccuracy / Mistake /
   Blunder), with what was better and how the mistake gets punished.
 - Arrows on the site's board: green = human move, blue = engine best, orange dotted = tempting mistake,
