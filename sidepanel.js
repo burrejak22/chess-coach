@@ -1,15 +1,21 @@
 import { Engine } from './lib/engine.js';
 import {
   coachPosition,
+  describeMistake,
   describeTrap,
   findMoveBetween,
+  findPositionBetween,
+  isPlausiblePosition,
+  lineAfterFirstMove,
+  mistakeCandidates,
   nullMoveFen,
+  overallAccuracy,
   playUci,
   resolveTurn,
   reviewLastMove,
   temptingReplies,
 } from './lib/coach.js';
-import { detectOpening, formatMoves } from './lib/openings.js';
+import { detectOpening } from './lib/openings.js';
 import { mountOpenings } from './openings-ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,12 +25,16 @@ const state = {
   tabId: null,
   gate: null,
   fen: null,
-  settings: { level: 1600, think: 2500, arrows: true, puzzle: false, turn: 'auto' },
+  settings: { level: 1600, think: 2500, arrows: true, mistakes: true, puzzle: false, turn: 'auto' },
   revealed: new Set(), // positions where you asked to see the puzzle answer
   hinted: new Set(),
   lastResult: null,
-  cache: new Map(), // fen -> { deep, shallow, nullLine }
+  cache: new Map(), // position -> { deep, shallow, nullLine, traps, mistake }; most recently used last
   prevFen: null,
+  orientation: 'white',
+  // graded moves, keyed by the position they led to, each pointing back at the position before it.
+  // Walking back from the current position gives the line that was played to reach it.
+  reviews: new Map(), // position -> { from: position, review }
   seq: 0,
 };
 
@@ -150,12 +160,12 @@ const renderMoves = (result) => {
   renderPuzzle(result);
 
   if (!result || puzzleHides(result)) {
-    ['human', 'best', 'alts', 'threat'].forEach((id) => fill(id));
+    ['human', 'best', 'alts', 'threat', 'mistake'].forEach((id) => fill(id));
 
     return;
   }
 
-  const { human, best, alternatives, threat } = result;
+  const { human, best, alternatives, threat, mistake } = result;
 
   fill('threat', threat ? [el('h3', {}, 'Their threat'), el('div', { class: 'txt' }, threat.text)] : []);
 
@@ -185,6 +195,19 @@ const renderMoves = (result) => {
     best.plan?.length ? el('div', { class: 'plan' }, 'Plan: ', el('b', {}, best.plan.join(' → '))) : null,
   ]);
 
+  fill('mistake', mistake && state.settings.mistakes ? [
+    el('h3', {}, 'Tempting mistake · what a weaker player might play'),
+    el(
+      'div',
+      { class: 'move' },
+      el('span', { class: 'san' }, `${mistake.san}?`),
+      el('span', { class: `grade ${mistake.grade}` }, mistake.grade),
+      el('span', { class: 'tag' }, `${mistake.eval} (−${(mistake.loss / 100).toFixed(1)})`),
+    ),
+    el('ul', {}, el('li', {}, el('b', {}, 'Why it\'s tempting: '), mistake.lure), el('li', {}, el('b', {}, 'What goes wrong: '), mistake.wrong)),
+    mistake.line?.length ? el('div', { class: 'plan' }, 'Line: ', el('b', {}, `${mistake.san} ${mistake.line.join(' ')}`)) : null,
+  ] : []);
+
   fill('alts', alternatives.length ? [
     el('h3', {}, 'Other good moves'),
     alternatives.map((a) => el(
@@ -213,6 +236,7 @@ const renderReview = (review) => {
       el('span', {}, `${who} played `, el('b', {}, review.san)),
       el('span', { class: `grade ${review.grade.split(' ')[0]}` }, review.grade),
       review.loss > 15 ? el('span', { class: 'tag' }, `(−${(review.loss / 100).toFixed(1)})`) : null,
+      Number.isFinite(review.accuracy) ? el('span', { class: 'tag' }, `${Math.round(review.accuracy)}% accuracy`) : null,
     ),
   ];
 
@@ -225,6 +249,102 @@ const renderReview = (review) => {
   }
 
   fill('review', children);
+};
+
+// ---------------------------------------------------------------------------------------------
+// accuracy for the line played so far
+// ---------------------------------------------------------------------------------------------
+
+const positionKey = (fen) => fen.split(' ').slice(0, 2).join(' ');
+
+const cacheSet = (key, data) => {
+  state.cache.delete(key);
+  state.cache.set(key, data);
+
+  while (state.cache.size > 400) {
+    state.cache.delete(state.cache.keys().next().value);
+  }
+};
+
+const recordReview = (fromFen, toFen, review) => {
+  if (!review) {
+    return;
+  }
+
+  const key = positionKey(toFen);
+
+  state.reviews.delete(key);
+  state.reviews.set(key, { from: positionKey(fromFen), review });
+
+  if (state.reviews.size > 3000) {
+    state.reviews.delete(state.reviews.keys().next().value);
+  }
+};
+
+/** The graded moves that led to `fen`, oldest first. */
+const lineReviews = (fen) => {
+  const out = [];
+  const seen = new Set();
+  let key = positionKey(fen);
+
+  while (state.reviews.has(key) && !seen.has(key) && out.length < 1000) {
+    seen.add(key);
+
+    const { from, review } = state.reviews.get(key);
+
+    out.push(review);
+    key = from;
+  }
+
+  return out.reverse();
+};
+
+const GRADE_ORDER = ['Best', 'Good', 'Inaccuracy', 'Mistake', 'Blunder'];
+const PLURAL = { Best: 'best', Good: 'good', Inaccuracy: 'inaccuracies', Mistake: 'mistakes', Blunder: 'blunders' };
+const SINGULAR = { Best: 'best', Good: 'good', Inaccuracy: 'inaccuracy', Mistake: 'mistake', Blunder: 'blunder' };
+const bucket = (grade) => (grade === 'Missed mate' ? 'Mistake' : grade);
+
+const renderAccuracy = (fen) => {
+  const reviews = fen ? lineReviews(fen) : [];
+
+  if (!reviews.length) {
+    fill('accuracy');
+
+    return;
+  }
+
+  const row = (color) => {
+    const mine = reviews.filter((r) => r.color === color);
+    const name = color === 'w' ? 'White' : 'Black';
+    const you = (color === 'w') === (state.orientation === 'white');
+
+    if (!mine.length) {
+      return el('div', { class: 'acc-row' }, el('div', { class: 'acc-name' }, name, you ? el('span', { class: 'muted' }, ' (you)') : ''), el('div', { class: 'acc-pct muted' }, '–'));
+    }
+
+    const pct = overallAccuracy(mine.map((r) => r.accuracy));
+    const counts = GRADE_ORDER
+      .map((g) => [g, mine.filter((r) => bucket(r.grade) === g).length])
+      .filter(([, n]) => n)
+      .map(([g, n]) => `${n} ${n === 1 ? SINGULAR[g] : PLURAL[g]}`)
+      .join(' · ');
+
+    return el(
+      'div',
+      { class: 'acc-row' },
+      el('div', { class: 'acc-name' }, name, you ? el('span', { class: 'muted' }, ' (you)') : ''),
+      el('div', { class: `acc-pct ${pct >= 85 ? 'hi' : (pct >= 65 ? 'mid' : 'lo')}` }, `${pct.toFixed(1)}%`),
+      el('div', { class: 'acc-dots' }, mine.map((r) => el('span', { class: `dot ${bucket(r.grade)}`, title: `${r.san}: ${r.grade} (${Math.round(r.accuracy)}%)` }))),
+      el('div', { class: 'acc-counts muted' }, counts),
+    );
+  };
+
+  fill(
+    'accuracy',
+    el('h3', {}, `Accuracy · ${reviews.length} move${reviews.length === 1 ? '' : 's'} so far`),
+    row('w'),
+    row('b'),
+  );
 };
 
 const sendArrows = (result) => {
@@ -248,6 +368,10 @@ const sendArrows = (result) => {
     if (result.threat) {
       arrows.push({ from: result.threat.from, to: result.threat.to, kind: 'threat' });
     }
+
+    if (result.mistake && state.settings.mistakes) {
+      arrows.push({ from: result.mistake.from, to: result.mistake.to, kind: 'mistake' });
+    }
   }
 
   chrome.tabs.sendMessage(state.tabId, { type: 'cc:arrows', arrows }).catch(() => {});
@@ -256,8 +380,6 @@ const sendArrows = (result) => {
 // ---------------------------------------------------------------------------------------------
 // analysis
 // ---------------------------------------------------------------------------------------------
-
-const positionKey = (fen) => fen.split(' ').slice(0, 2).join(' ');
 
 const analyzeFen = async (fen) => {
   const seq = ++state.seq;
@@ -277,36 +399,77 @@ const analyzeFen = async (fen) => {
     return result;
   };
 
-  const reviewFrom = (prevFen, deep) => {
+  // grades the move(s) from the previous position, then shows the last move & accuracy for this line
+  const reviewFrom = async (prevFen, deep) => {
     const prev = prevFen ? state.cache.get(positionKey(prevFen)) : null;
 
-    if (!prev?.deep?.length || !findMoveBetween(prevFen, fen)) {
-      renderReview(null);
+    if (prev?.deep?.length && !state.reviews.has(key)) {
+      if (findMoveBetween(prevFen, fen)) {
+        recordReview(prevFen, fen, reviewLastMove(prevFen, prev.deep, fen, deep));
+      } else {
+        // two moves happened while we were busy (a quick reply from the computer): grade both
+        const mid = findPositionBetween(prevFen, fen);
 
-      return;
+        if (mid) {
+          const midKey = positionKey(mid);
+          let midLines = state.cache.get(midKey)?.deep;
+
+          if (!midLines?.length) {
+            const basic = /Basic engine/.test(engine.name || '');
+
+            midLines = await engine.analyze(mid, { multipv: 1, depth: basic ? 6 : 14 });
+
+            if (stale() || !midLines?.length) {
+              return;
+            }
+
+            cacheSet(midKey, { deep: midLines, shallow: [], partial: true });
+          }
+
+          recordReview(prevFen, mid, reviewLastMove(prevFen, prev.deep, mid, midLines));
+          recordReview(mid, fen, reviewLastMove(mid, midLines, fen, deep));
+        }
+      }
     }
 
-    renderReview(reviewLastMove(prevFen, prev.deep, fen, deep));
+    renderReview(state.reviews.get(key)?.review || null);
+    renderAccuracy(fen);
   };
 
   const prevFen = state.prevFen;
 
-  if (cached?.deep?.length) {
+  // a partial entry only has the main search (no traps etc.), so the position is searched again
+  if (cached?.deep?.length && !cached.partial) {
+    // keep recently viewed positions at the end so they're the last to be evicted
+    cacheSet(key, cached);
     show(cached);
-    reviewFrom(prevFen, cached.deep);
     state.prevFen = fen;
+    await reviewFrom(prevFen, cached.deep);
 
     return;
   }
 
-  renderReview(null);
+  renderReview(state.reviews.get(key)?.review || null);
+  renderAccuracy(fen);
   renderEval(null, 'thinking…');
   renderMoves(null);
+  sendArrows(null); // the old position's arrows would point at the wrong pieces
 
   // 1) quick look so something shows up right away
-  const shallow = await engine.analyze(fen, { multipv: 5, depth: 6 });
+  let shallow = await engine.analyze(fen, { multipv: 5, depth: 6 });
 
-  if (stale() || !shallow?.length) {
+  // the engine was restarted mid-search: give the position one more try
+  if (!stale() && !shallow?.length) {
+    shallow = await engine.analyze(fen, { multipv: 5, depth: 6 });
+  }
+
+  if (stale()) {
+    return;
+  }
+
+  if (!shallow?.length) {
+    renderEval(null, 'The engine couldn\'t analyze this position.');
+
     return;
   }
 
@@ -324,6 +487,17 @@ const analyzeFen = async (fen) => {
   const deep = await engine.analyze(fen, { multipv: 5, movetime: Number(state.settings.think) });
 
   if (stale() || !deep?.length) {
+    return;
+  }
+
+  show({ deep, shallow, nullLine }, 'checking traps…');
+
+  // the main search is enough to grade moves: do it now, so a quick reply doesn't skip this move
+  cacheSet(key, { deep, shallow, nullLine, partial: true });
+  state.prevFen = fen;
+  await reviewFrom(prevFen, deep);
+
+  if (stale()) {
     return;
   }
 
@@ -361,25 +535,48 @@ const analyzeFen = async (fen) => {
     return;
   }
 
-  const data = { deep, shallow, nullLine, traps };
+  // 5) tempting mistakes: the most natural-looking moves that aren't among the good ones, checked one by one
+  let mistake = null;
 
-  state.cache.set(key, data);
+  for (const candidate of mistakeCandidates(fen, deep, shallow, basic ? 2 : 4)) {
+    let reply = lineAfterFirstMove(candidate.known);
 
-  if (state.cache.size > 400) {
-    state.cache.delete(state.cache.keys().next().value);
+    if (!reply) {
+      const after = playUci(fen, candidate.uci)?.chess.fen();
+
+      reply = after ? (await engine.analyze(after, { multipv: 1, depth: basic ? 6 : 11 }))?.[0] || null : null;
+    }
+
+    if (stale()) {
+      return;
+    }
+
+    mistake = describeMistake(fen, candidate.uci, reply, deep[0]);
+
+    if (mistake) {
+      break;
+    }
   }
 
+  const data = { deep, shallow, nullLine, traps, mistake };
+
+  cacheSet(key, data);
+
   show(data);
-  reviewFrom(prevFen, deep);
-  state.prevFen = fen;
 };
 
 const onBoard = (message) => {
+  // a board that can't be real (a piece mid-capture, a half-drawn board) is ignored until it settles
+  if (message?.fen && !isPlausiblePosition(message.fen)) {
+    message = { ...message, fen: null };
+  }
+
   if (message?.fen) {
     message = { ...message, fen: resolveTurn(message, state.fen, state.settings.turn) };
   }
 
   state.gate = message.gate;
+  state.orientation = message.orientation || state.orientation;
   renderGate(message.gate);
 
   if (!message.gate?.allowed || !message.fen) {
@@ -389,6 +586,8 @@ const onBoard = (message) => {
     if (message.gate?.allowed && !message.fen) {
       $('thinking').textContent = 'Waiting for a board…';
     }
+
+    sendArrows(null);
 
     return;
   }
@@ -428,8 +627,6 @@ const showTab = (name) => {
 $('tab-coach').addEventListener('click', () => showTab('coach'));
 $('tab-openings').addEventListener('click', () => { openings.refresh(); showTab('openings'); });
 
-void formatMoves;
-
 // ---------------------------------------------------------------------------------------------
 // tabs & messages
 // ---------------------------------------------------------------------------------------------
@@ -439,10 +636,15 @@ const forcedTab = Number(new URLSearchParams(location.search).get('tab')) || nul
 
 const requestBoard = async () => {
   const [tab] = forcedTab ? [{ id: forcedTab }] : await chrome.tabs.query({ active: true, currentWindow: true });
+  const newTab = (tab?.id ?? null) !== state.tabId;
 
   state.tabId = tab?.id ?? null;
   state.fen = null;
-  state.prevFen = null;
+
+  // a reload of the same tab keeps the previous position, so a move made across a reload is still graded
+  if (newTab) {
+    state.prevFen = null;
+  }
 
   if (!state.tabId) {
     return;
@@ -481,13 +683,16 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
 // ---------------------------------------------------------------------------------------------
 
 const bindSettings = async () => {
-  const saved = await chrome.storage.local.get(['level', 'think', 'arrows', 'puzzle', 'turn']);
+  const saved = await chrome.storage.local.get(['level', 'think', 'arrows', 'mistakes', 'puzzle', 'turn']);
 
   Object.assign(state.settings, Object.fromEntries(Object.entries(saved).filter(([, v]) => v !== undefined)));
+
+  const save = () => chrome.storage.local.set(state.settings);
 
   $('level').value = String(state.settings.level);
   $('think').value = String(state.settings.think);
   $('arrows').checked = !!state.settings.arrows;
+  $('mistakes').checked = !!state.settings.mistakes;
   $('puzzle').checked = !!state.settings.puzzle;
   $('turn-select').value = state.settings.turn || 'auto';
 
@@ -505,17 +710,14 @@ const bindSettings = async () => {
     rerender();
   });
 
-  const save = () => chrome.storage.local.set(state.settings);
 
   $('level').addEventListener('change', () => {
     state.settings.level = Number($('level').value);
     save();
 
-    // the human pick depends on the level, but the analysis doesn't: re-render from the cache
-    if (state.fen) {
-      state.prevFen = null;
-      analyzeFen(state.fen);
-    }
+    // the human pick depends on the level, but the analysis doesn't: redraw from what we have
+    // (keeps the last-move review, and an unfinished search carries on with the new level)
+    rerender();
   });
 
   $('think').addEventListener('change', () => {
@@ -531,12 +733,13 @@ const bindSettings = async () => {
   $('arrows').addEventListener('change', () => {
     state.settings.arrows = $('arrows').checked;
     save();
+    rerender();
+  });
 
-    if (state.fen) {
-      const cached = state.cache.get(positionKey(state.fen));
-
-      sendArrows(cached ? coachPosition(state.fen, { ...cached, level: state.settings.level }) : null);
-    }
+  $('mistakes').addEventListener('change', () => {
+    state.settings.mistakes = $('mistakes').checked;
+    save();
+    rerender();
   });
 };
 

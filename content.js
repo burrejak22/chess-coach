@@ -9,22 +9,106 @@
   window.__chessCoachLoaded = true;
 
   const FILES = 'abcdefgh';
-  const ROLE = { pawn: 'p', knight: 'n', bishop: 'b', rook: 'v', queen: 'q', king: 'k' };
+  const ROLE = { pawn: 'p', knight: 'n', bishop: 'b', rook: 'r', queen: 'q', king: 'k' };
 
   // ---------------------------------------------------------------------------------------------
-  // page gate: the coach is on at all times on both sites
+  // page gate: on for study pages, off during live/daily games and unsolved puzzles.
+  // Anything not recognised stays off, so a site redesign fails safe.
   // ---------------------------------------------------------------------------------------------
 
-  const gate = (_doc = document, loc = location) => {
+  const on = (site, mode) => ({ site, allowed: true, mode });
+  const off = (site, reason) => ({ site, allowed: false, reason });
+  const LIVE = 'Live game in progress. The coach turns back on when the game ends.';
+
+  const lichessGate = (doc, path) => {
+    const site = 'Lichess';
+
+    if (/^\/analysis(\/|$)/.test(path)) {
+      return on(site, 'Analysis board');
+    }
+
+    if (/^\/(study|broadcast)(\/|$)/.test(path)) {
+      return on(site, 'Study');
+    }
+
+    if (/^\/editor(\/|$)/.test(path)) {
+      return on(site, 'Board editor');
+    }
+
+    if (/^\/training(\/|$)/.test(path)) {
+      // after a puzzle is finished Lichess shows the "after" feedback / vote panel
+      return doc.querySelector('.puzzle__feedback.after, .puzzle__vote')
+        ? on(site, 'Solved puzzle')
+        : off(site, 'Puzzle not solved yet. Solve it first, then the coach turns on.');
+    }
+
+    // game pages: /<8 or 12 char id>, optionally /white or /black
+    if (/^\/[A-Za-z0-9]{8}(?:[A-Za-z0-9]{4})?(?:\/(?:white|black))?\/?$/.test(path)) {
+      if (doc.querySelector('.rclock.running')) {
+        return off(site, LIVE);
+      }
+
+      if (doc.querySelector('.result-wrap')) {
+        return on(site, 'Finished game');
+      }
+
+      // Lichess usernames can't contain spaces, so "Stockfish level N" is the built-in AI
+      const players = [...doc.querySelectorAll('.ruser, .ruser-top, .ruser-bottom')].map((e) => e.textContent).join(' ');
+
+      if (/Stockfish level \d/i.test(players)) {
+        return on(site, 'Vs computer');
+      }
+
+      return off(site, LIVE);
+    }
+
+    return off(site, 'Open an analysis board, a study, a finished game or a solved puzzle.');
+  };
+
+  const chessComGate = (doc, path) => {
+    const site = 'Chess.com';
+
+    if (/^\/(analysis|explorer)(\/|$)/.test(path)) {
+      return on(site, 'Analysis board');
+    }
+
+    if (/^\/play\/computer(\/|$)/.test(path)) {
+      return on(site, 'Vs computer');
+    }
+
+    if (/^\/(puzzles?|daily-chess-puzzle|puzzle-rush|puzzle-battle)(\/|$)/.test(path)) {
+      return off(site, 'Puzzles are off. Use Lichess puzzles (on once solved) or an analysis board.');
+    }
+
+    if (/^\/game\//.test(path)) {
+      if (doc.querySelector('.clock-player-turn')) {
+        return off(site, LIVE);
+      }
+
+      if (doc.querySelector('.game-over-modal-content, .game-over-header-component, .game-over-buttons-component')) {
+        return on(site, 'Finished game');
+      }
+
+      return off(site, LIVE);
+    }
+
+    if (/^\/(play|live|daily)(\/|$)/.test(path)) {
+      return off(site, LIVE);
+    }
+
+    return off(site, 'Open an analysis board, a finished game, or a game vs the computer.');
+  };
+
+  const gate = (doc = document, loc = location) => {
     if (/(^|\.)lichess\.org$/.test(loc.hostname)) {
-      return { site: 'Lichess', allowed: true, mode: 'Always on' };
+      return lichessGate(doc, loc.pathname);
     }
 
     if (/(^|\.)chess\.com$/.test(loc.hostname)) {
-      return { site: 'Chess.com', allowed: true, mode: 'Always on' };
+      return chessComGate(doc, loc.pathname);
     }
 
-    return { site: null, allowed: false, reason: 'This site isn\'t supported yet.' };
+    return off(null, 'This site isn\'t supported yet.');
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -294,7 +378,11 @@
       return [(x + 0.5) * sq, (y + 0.5) * sq];
     };
 
-    const colors = { human: '#2e9e5b', best: '#2f6fd6', threat: '#d64545' };
+    // green = human move, blue = engine best, orange dotted = tempting mistake, red dashed = their threat
+    const colors = { human: '#2e9e5b', best: '#2f6fd6', mistake: '#e8871e', threat: '#d64545' };
+    const dashes = { threat: `${sq * 0.2} ${sq * 0.15}`, mistake: `${sq * 0.01} ${sq * 0.24}` };
+    // later arrows are drawn on top: the move we recommend should never be hidden by the others
+    const layer = { mistake: 0, threat: 1, best: 2, human: 3 };
     let svg = '<defs>';
 
     Object.entries(colors).forEach(([key, color]) => {
@@ -303,20 +391,21 @@
 
     svg += '</defs>';
 
-    arrows.forEach((a) => {
-      if (!a?.from || !a?.to) {
+    [...arrows].sort((a, b) => (layer[a?.kind] ?? 2) - (layer[b?.kind] ?? 2)).forEach((a) => {
+      if (!/^[a-h][1-8]$/.test(a?.from || '') || !/^[a-h][1-8]$/.test(a?.to || '')) {
         return;
       }
 
+      const kind = a.kind in colors ? a.kind : 'best';
       const [x1, y1] = center(a.from);
       const [x2, y2] = center(a.to);
       const len = Math.hypot(x2 - x1, y2 - y1) || 1;
       const shorten = sq * 0.3;
       const ex = x2 - (((x2 - x1) / len) * shorten);
       const ey = y2 - (((y2 - y1) / len) * shorten);
-      const color = colors[a.kind] || colors.best;
+      const dash = dashes[kind] ? `stroke-dasharray="${dashes[kind]}"` : '';
 
-      svg += `<line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${color}" stroke-width="${sq * 0.16}" stroke-linecap="round" opacity="0.8" ${a.kind === 'threat' ? `stroke-dasharray="${sq * 0.2} ${sq * 0.15}"` : ''} marker-end="url(#cc-head-${a.kind in colors ? a.kind : 'best'})"/>`;
+      svg += `<line data-kind="${kind}" x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${colors[kind]}" stroke-width="${sq * 0.16}" stroke-linecap="round" opacity="0.8" ${dash} marker-end="url(#cc-head-${kind})"/>`;
     });
 
     overlay.innerHTML = svg;
@@ -328,6 +417,7 @@
 
   let currentGate = { allowed: false };
   let lastSent = '';
+  let timer = null;
 
   const snapshot = () => {
     currentGate = gate();
@@ -356,6 +446,7 @@
 
       return;
     }
+
     const key = JSON.stringify([message.gate, message.fen, message.orientation]);
 
     if (!message.gate.allowed) {
@@ -377,7 +468,6 @@
     }
   };
 
-  let timer = null;
   const schedule = () => {
     clearTimeout(timer);
     timer = setTimeout(() => publish(false), 80);

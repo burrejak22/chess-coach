@@ -7,9 +7,20 @@ puzzle, or a game vs the computer, and the side panel shows:
   reasons (wins material, fork, stops their threat, develops, takes the open file…) and the plan that follows.
 - **Engine's best**, when it differs, and a couple of other good moves.
 - **Their threat**: what the opponent would do if it were their move.
+- **Tempting mistake**: a natural-looking move a weaker player might play (grabs a pawn, gives check, attacks
+  something) that's worse, with why it's tempting and what goes wrong. Only inaccuracies and mistakes
+  (0.6 to 2.5 pawns worse) are shown; game-losing blunders and moves that walk into mate aren't. Turn it off with
+  the **Mistakes** checkbox.
+- **Accuracy**: a running score for each side as the game goes (the same idea as Chess.com's and Lichess'
+  accuracy: how much of your winning chances each move kept), with a colored square per move and counts of
+  best / good / inaccuracies / mistakes / blunders. It follows the line on the board: step back and it shows the
+  score up to that move, step forward and the later moves come back. Works while you play the computer and while
+  you go through a game or an analysis line. Like the rest of the coach, it's off during live games.
 - **Last move review**: step through a game and each move gets graded (Best / Good / Inaccuracy / Mistake /
   Blunder), with what was better and how the mistake gets punished.
-- Arrows on the site's board: green = human move, blue = engine best, red dashed = their threat.
+- Arrows on the site's board: green = human move, blue = engine best, orange dotted = tempting mistake,
+  red dashed = their threat. Each one has its own line style as well as its own color, so they can be told apart
+  even with red-green color blindness.
 - **Badges**: *Brilliant!!* (a sound sacrifice that isn't obvious), *Only move* (everything else is much worse),
   *Trap* (their most tempting reply loses, and it tells you how you punish it).
 - **Puzzle mode**: when there's a tactic, it tells you there's one (and the theme), hides the answer, and gives a
@@ -24,11 +35,15 @@ puzzle, or a game vs the computer, and the side panel shows:
   "Open on Lichess" opens the position on Lichess' analysis board.
 
 **It turns itself off during live and daily games**, and in unsolved puzzles. While it's off, it doesn't read or
-send the position at all.
+send the position at all. It's on for analysis boards, studies, the board editor, finished games, solved Lichess
+puzzles, and games vs the computer. Any page it doesn't recognise stays off.
+
+To debug the board reader, use an analysis board or a finished game: they use the same board markup as live
+games. `test/mock-pages.mjs` builds fake pages from any FEN for the browser test.
 
 ## Install
 
-1. Download `chess-coach-v3.zip` from the Releases page and unzip it.
+1. Download the latest `chess-coach` zip from the Releases page and unzip it.
 2. In Chrome, go to `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the
    unzipped `chess-coach` folder.
 3. Pin the extension, open e.g. `lichess.org/analysis`, and click the icon to open the side panel.
@@ -37,9 +52,10 @@ Stockfish is already included in `engine\`, so there is nothing else to install.
 
 ## Development
 
-- `node test/turn.test.mjs`: whose-turn logic.
-- `npm test`: coach logic tests (uses the built-in engine); also `node test/tactics.test.mjs` and
-  `node test/openings.test.mjs` (checks every opening line and trap move by move).
-- `node test/browser.test.mjs`: loads the extension in Chrome against fake Lichess / Chess.com pages.
+- `npm test`: all the logic tests (whose turn, coach, tactics, tempting mistakes, and every opening line and trap
+  move by move). They use the built-in backup engine, so they run without a browser.
+- `npm run test:browser`: loads the extension in Chrome against fake Lichess / Chess.com pages. Needs Playwright;
+  set `CHROME=/path/to/chrome` and/or `PLAYWRIGHT=/path/to/playwright` if they aren't in the default places.
+  `SHOT=out/panel.png` also saves screenshots.
 
 Third-party: chess.js (BSD-2-Clause, `lib/chess.js.LICENSE`); Stockfish (GPLv3), included in `engine\` (`engine/STOCKFISH-LICENSE.txt`; source at https://github.com/nmrugg/stockfish.js).
