@@ -1,13 +1,20 @@
 // Loads the real extension in Chrome, serves fake Lichess / Chess.com pages, and checks what the coach does.
 import { createRequire } from 'node:module';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lichessPage, chessComPage } from './mock-pages.mjs';
 
+// Playwright & Chrome locations can be overridden: PLAYWRIGHT=/path/to/playwright CHROME=/path/to/chrome
 const require = createRequire(import.meta.url);
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+const loadPlaywright = () => {
+  for (const id of [process.env.PLAYWRIGHT, 'playwright', '/opt/node22/lib/node_modules/playwright'].filter(Boolean)) {
+    try { return require(id); } catch { /* try the next one */ }
+  }
+  throw new Error('Playwright not found. Run "npm i -D playwright" or set PLAYWRIGHT=/path/to/playwright');
+};
+const { chromium } = loadPlaywright();
 
 const extension = join(dirname(fileURLToPath(import.meta.url)), '..');
 let fails = 0;
@@ -17,7 +24,7 @@ const check = (name, cond, detail) => {
 };
 
 const context = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'cc-')), {
-  executablePath: '/usr/bin/google-chrome',
+  executablePath: process.env.CHROME || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined),
   headless: true,
   args: [
     '--headless=new',
@@ -103,6 +110,14 @@ check('Chess.com finished game: allowed', msg?.gate?.allowed === true, msg?.gate
 ({ msg } = await visit('https://www.chess.com/puzzles/rated', chessComPage(fen2, {})));
 check('Chess.com puzzles: blocked', msg?.gate?.allowed === false, msg?.gate);
 
+// --- Lichess vs the built-in AI: allowed
+({ msg } = await visit('https://lichess.org/aiGame12', lichessPage(fen1, { lastMove: ['d1', 'h5'], extra: '<div class="ruser-top ruser"><name>Stockfish level 3</name></div>' })));
+check('Lichess vs Stockfish: allowed', msg?.gate?.allowed === true && msg?.gate?.mode === 'Vs computer', msg?.gate);
+
+// --- Chess.com online play: blocked
+({ msg } = await visit('https://www.chess.com/play/online', chessComPage(fen2, { lastMove: ['d7', 'd5'] })));
+check('Chess.com online play: blocked', msg?.gate?.allowed === false && msg?.fen === null, msg?.gate);
+
 // --- fast moves: nothing is read while a piece is mid-animation, then the final square is picked up
 const animUrl = 'https://lichess.org/analysis/anim';
 const { page: animPage } = await visit(animUrl, lichessPage('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', {}));
@@ -168,6 +183,26 @@ if (process.env.SHOT) {
 
 const arrowCount = await lichess.evaluate(() => document.querySelectorAll('svg[data-chess-coach] line').length);
 check('arrows drawn on the board', arrowCount >= 1, arrowCount);
+
+// --- tempting mistake: after 1.e4 e5 2.Nf3 Nc6 3.Bc4 Nd4, grabbing e5 with 4.Nxe5? is the classic one
+const shillingFen = 'r1bqkbnr/pppp1ppp/8/4p3/2BnP3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
+pages.set('https://lichess.org/analysis/shilling', lichessPage(shillingFen, { lastMove: ['c6', 'd4'] }));
+await lichess.goto('https://lichess.org/analysis/shilling');
+await panel.waitForFunction(() => !document.getElementById('mistake').hidden, null, { timeout: 90000 }).catch(() => {});
+const mistakeCard = await panel.evaluate(() => (document.getElementById('mistake').hidden ? null : document.getElementById('mistake').innerText));
+console.log('\n--- tempting mistake ---\n', mistakeCard, '\n');
+check('panel shows a tempting mistake with why & what goes wrong', /Why it's tempting/.test(mistakeCard || '') && /What goes wrong/.test(mistakeCard || ''), mistakeCard);
+const kinds = await lichess.evaluate(() => [...document.querySelectorAll('svg[data-chess-coach] line')].map((l) => [l.dataset.kind, l.getAttribute('stroke')]));
+check('orange mistake arrow drawn', kinds.some(([k, c]) => k === 'mistake' && c === '#e8871e'), kinds);
+if (process.env.SHOT) {
+  await panel.screenshot({ path: process.env.SHOT.replace('.png', '-mistake.png'), fullPage: true });
+  await lichess.screenshot({ path: process.env.SHOT.replace('.png', '-mistake-board.png') });
+}
+await panel.uncheck('#mistakes');
+await new Promise((r) => setTimeout(r, 300));
+const afterToggle = await lichess.evaluate(() => document.querySelectorAll('svg[data-chess-coach] line[data-kind="mistake"]').length);
+check('Mistakes toggle removes the orange arrow', afterToggle === 0, afterToggle);
+await panel.check('#mistakes');
 
 // --- opening detection: Italian Game after 1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5 (White to move)
 const italianFen = 'r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';

@@ -1,15 +1,18 @@
 import { Engine } from './lib/engine.js';
 import {
   coachPosition,
+  describeMistake,
   describeTrap,
   findMoveBetween,
+  lineAfterFirstMove,
+  mistakeCandidates,
   nullMoveFen,
   playUci,
   resolveTurn,
   reviewLastMove,
   temptingReplies,
 } from './lib/coach.js';
-import { detectOpening, formatMoves } from './lib/openings.js';
+import { detectOpening } from './lib/openings.js';
 import { mountOpenings } from './openings-ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,11 +22,11 @@ const state = {
   tabId: null,
   gate: null,
   fen: null,
-  settings: { level: 1600, think: 2500, arrows: true, puzzle: false, turn: 'auto' },
+  settings: { level: 1600, think: 2500, arrows: true, mistakes: true, puzzle: false, turn: 'auto' },
   revealed: new Set(), // positions where you asked to see the puzzle answer
   hinted: new Set(),
   lastResult: null,
-  cache: new Map(), // fen -> { deep, shallow, nullLine }
+  cache: new Map(), // position -> { deep, shallow, nullLine, traps, mistake }; most recently used last
   prevFen: null,
   seq: 0,
 };
@@ -150,12 +153,12 @@ const renderMoves = (result) => {
   renderPuzzle(result);
 
   if (!result || puzzleHides(result)) {
-    ['human', 'best', 'alts', 'threat'].forEach((id) => fill(id));
+    ['human', 'best', 'alts', 'threat', 'mistake'].forEach((id) => fill(id));
 
     return;
   }
 
-  const { human, best, alternatives, threat } = result;
+  const { human, best, alternatives, threat, mistake } = result;
 
   fill('threat', threat ? [el('h3', {}, 'Their threat'), el('div', { class: 'txt' }, threat.text)] : []);
 
@@ -184,6 +187,19 @@ const renderMoves = (result) => {
     list(best.reasons),
     best.plan?.length ? el('div', { class: 'plan' }, 'Plan: ', el('b', {}, best.plan.join(' → '))) : null,
   ]);
+
+  fill('mistake', mistake && state.settings.mistakes ? [
+    el('h3', {}, 'Tempting mistake · what a weaker player might play'),
+    el(
+      'div',
+      { class: 'move' },
+      el('span', { class: 'san' }, `${mistake.san}?`),
+      el('span', { class: `grade ${mistake.grade}` }, mistake.grade),
+      el('span', { class: 'tag' }, `${mistake.eval} (−${(mistake.loss / 100).toFixed(1)})`),
+    ),
+    el('ul', {}, el('li', {}, el('b', {}, 'Why it\'s tempting: '), mistake.lure), el('li', {}, el('b', {}, 'What goes wrong: '), mistake.wrong)),
+    mistake.line?.length ? el('div', { class: 'plan' }, 'Line: ', el('b', {}, `${mistake.san} ${mistake.line.join(' ')}`)) : null,
+  ] : []);
 
   fill('alts', alternatives.length ? [
     el('h3', {}, 'Other good moves'),
@@ -248,6 +264,10 @@ const sendArrows = (result) => {
     if (result.threat) {
       arrows.push({ from: result.threat.from, to: result.threat.to, kind: 'threat' });
     }
+
+    if (result.mistake && state.settings.mistakes) {
+      arrows.push({ from: result.mistake.from, to: result.mistake.to, kind: 'mistake' });
+    }
   }
 
   chrome.tabs.sendMessage(state.tabId, { type: 'cc:arrows', arrows }).catch(() => {});
@@ -292,6 +312,9 @@ const analyzeFen = async (fen) => {
   const prevFen = state.prevFen;
 
   if (cached?.deep?.length) {
+    // keep recently viewed positions at the end so they're the last to be evicted
+    state.cache.delete(key);
+    state.cache.set(key, cached);
     show(cached);
     reviewFrom(prevFen, cached.deep);
     state.prevFen = fen;
@@ -302,6 +325,7 @@ const analyzeFen = async (fen) => {
   renderReview(null);
   renderEval(null, 'thinking…');
   renderMoves(null);
+  sendArrows(null); // the old position's arrows would point at the wrong pieces
 
   // 1) quick look so something shows up right away
   const shallow = await engine.analyze(fen, { multipv: 5, depth: 6 });
@@ -326,6 +350,8 @@ const analyzeFen = async (fen) => {
   if (stale() || !deep?.length) {
     return;
   }
+
+  show({ deep, shallow, nullLine }, 'checking traps…');
 
   // 4) traps: do their most tempting replies to our top moves lose?
   const traps = {};
@@ -361,7 +387,30 @@ const analyzeFen = async (fen) => {
     return;
   }
 
-  const data = { deep, shallow, nullLine, traps };
+  // 5) tempting mistakes: the most natural-looking moves that aren't among the good ones, checked one by one
+  let mistake = null;
+
+  for (const candidate of mistakeCandidates(fen, deep, shallow, basic ? 2 : 4)) {
+    let reply = lineAfterFirstMove(candidate.known);
+
+    if (!reply) {
+      const after = playUci(fen, candidate.uci)?.chess.fen();
+
+      reply = after ? (await engine.analyze(after, { multipv: 1, depth: basic ? 6 : 11 }))?.[0] || null : null;
+    }
+
+    if (stale()) {
+      return;
+    }
+
+    mistake = describeMistake(fen, candidate.uci, reply, deep[0]);
+
+    if (mistake) {
+      break;
+    }
+  }
+
+  const data = { deep, shallow, nullLine, traps, mistake };
 
   state.cache.set(key, data);
 
@@ -389,6 +438,8 @@ const onBoard = (message) => {
     if (message.gate?.allowed && !message.fen) {
       $('thinking').textContent = 'Waiting for a board…';
     }
+
+    sendArrows(null);
 
     return;
   }
@@ -427,8 +478,6 @@ const showTab = (name) => {
 
 $('tab-coach').addEventListener('click', () => showTab('coach'));
 $('tab-openings').addEventListener('click', () => { openings.refresh(); showTab('openings'); });
-
-void formatMoves;
 
 // ---------------------------------------------------------------------------------------------
 // tabs & messages
@@ -481,13 +530,16 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
 // ---------------------------------------------------------------------------------------------
 
 const bindSettings = async () => {
-  const saved = await chrome.storage.local.get(['level', 'think', 'arrows', 'puzzle', 'turn']);
+  const saved = await chrome.storage.local.get(['level', 'think', 'arrows', 'mistakes', 'puzzle', 'turn']);
 
   Object.assign(state.settings, Object.fromEntries(Object.entries(saved).filter(([, v]) => v !== undefined)));
+
+  const save = () => chrome.storage.local.set(state.settings);
 
   $('level').value = String(state.settings.level);
   $('think').value = String(state.settings.think);
   $('arrows').checked = !!state.settings.arrows;
+  $('mistakes').checked = !!state.settings.mistakes;
   $('puzzle').checked = !!state.settings.puzzle;
   $('turn-select').value = state.settings.turn || 'auto';
 
@@ -505,17 +557,14 @@ const bindSettings = async () => {
     rerender();
   });
 
-  const save = () => chrome.storage.local.set(state.settings);
 
   $('level').addEventListener('change', () => {
     state.settings.level = Number($('level').value);
     save();
 
-    // the human pick depends on the level, but the analysis doesn't: re-render from the cache
-    if (state.fen) {
-      state.prevFen = null;
-      analyzeFen(state.fen);
-    }
+    // the human pick depends on the level, but the analysis doesn't: redraw from what we have
+    // (keeps the last-move review, and an unfinished search carries on with the new level)
+    rerender();
   });
 
   $('think').addEventListener('change', () => {
@@ -531,12 +580,13 @@ const bindSettings = async () => {
   $('arrows').addEventListener('change', () => {
     state.settings.arrows = $('arrows').checked;
     save();
+    rerender();
+  });
 
-    if (state.fen) {
-      const cached = state.cache.get(positionKey(state.fen));
-
-      sendArrows(cached ? coachPosition(state.fen, { ...cached, level: state.settings.level }) : null);
-    }
+  $('mistakes').addEventListener('change', () => {
+    state.settings.mistakes = $('mistakes').checked;
+    save();
+    rerender();
   });
 };
 

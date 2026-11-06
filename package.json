@@ -1,13 +1,14 @@
 {
   "name": "chess-coach",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Chess study helper extension (Lichess & Chess.com).",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/setup.mjs",
     "setup": "node scripts/setup.mjs",
-    "test": "node test/coach.test.mjs"
+    "test": "node test/turn.test.mjs && node test/coach.test.mjs && node test/tactics.test.mjs && node test/mistakes.test.mjs && node test/openings.test.mjs",
+    "test:browser": "node test/browser.test.mjs"
   },
   "dependencies": {
     "stockfish": "^19.0.0"

@@ -1,6 +1,6 @@
 :root {
   --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e1dc;
-  --human: #2e9e5b; --best: #2f6fd6; --threat: #d64545; --warn: #c7811a;
+  --human: #2e9e5b; --best: #2f6fd6; --mistake: #e8871e; --threat: #d64545; --warn: #c7811a;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -29,6 +29,8 @@ body { margin: 0; padding: 12px; background: var(--bg); color: var(--text); font
 .san { font-size: 20px; font-weight: 700; }
 .human .san { color: var(--human); }
 .best .san { color: var(--best); }
+.mistake { border-color: color-mix(in srgb, var(--mistake) 45%, var(--line)); }
+.mistake .san { color: var(--mistake); }
 .tag { font-size: 11px; color: var(--muted); }
 .card ul { margin: 6px 0 0; padding-left: 18px; }
 .card li { margin: 2px 0; }
@@ -45,6 +47,7 @@ body { margin: 0; padding: 12px; background: var(--bg); color: var(--text); font
 footer { margin-top: 6px; display: grid; gap: 2px; }
 .sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-left: 4px; }
 .sw.human { background: var(--human); } .sw.best { background: var(--best); } .sw.threat { background: var(--threat); }
+.sw.mistake { background: repeating-linear-gradient(90deg, var(--mistake) 0 2px, transparent 2px 4px); }
 .tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
 .tab { background: none; border: 0; padding: 6px 10px; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
 .tab.active { color: var(--text); border-bottom-color: var(--human); }

@@ -60,6 +60,7 @@
         </select>
       </label>
       <label class="check"><input type="checkbox" id="arrows" checked> Arrows</label>
+      <label class="check" title="Show a natural-looking move that's worse, and why"><input type="checkbox" id="mistakes" checked> Mistakes</label>
       <label class="check" title="When there's a tactic, hide the answer until you ask"><input type="checkbox" id="puzzle"> Puzzle mode</label>
     </section>
 
@@ -71,6 +72,7 @@
     <section id="human" class="card human" hidden></section>
     <section id="best" class="card best" hidden></section>
     <section id="alts" class="card alts" hidden></section>
+    <section id="mistake" class="card mistake" hidden></section>
   </main>
   </div>
 
@@ -78,7 +80,7 @@
 
   <footer class="muted small">
     <div id="engine-name">Engine: starting…</div>
-    <div>For study only. Arrows: <span class="sw human"></span> human move <span class="sw best"></span> engine best <span class="sw threat"></span> their threat</div>
+    <div>For study only. Arrows: <span class="sw human"></span> human move <span class="sw best"></span> engine best <span class="sw mistake"></span> tempting mistake <span class="sw threat"></span> their threat</div>
   </footer>
 
   <script type="module" src="sidepanel.js"></script>
