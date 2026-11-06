@@ -1,6 +1,3 @@
-// Chess Coach content script: reads the board on Lichess & Chess.com.
-// It never makes moves; it only reads the position and draws arrows the side panel asks for.
-
 (() => {
   if (window.__chessCoachLoaded) {
     return;
@@ -12,13 +9,11 @@
   const ROLE = { pawn: 'p', knight: 'n', bishop: 'b', rook: 'r', queen: 'q', king: 'k' };
 
   // ---------------------------------------------------------------------------------------------
-  // page gate: on for study pages, off during live/daily games and unsolved puzzles.
-  // Anything not recognised stays off, so a site redesign fails safe.
+  // page gate: on for any recognisable board, unknown pages stay off so a site redesign fails safe
   // ---------------------------------------------------------------------------------------------
 
   const on = (site, mode) => ({ site, allowed: true, mode });
   const off = (site, reason) => ({ site, allowed: false, reason });
-  const LIVE = 'Live game in progress. The coach turns back on when the game ends.';
 
   const lichessGate = (doc, path) => {
     const site = 'Lichess';
@@ -36,33 +31,15 @@
     }
 
     if (/^\/training(\/|$)/.test(path)) {
-      // after a puzzle is finished Lichess shows the "after" feedback / vote panel
-      return doc.querySelector('.puzzle__feedback.after, .puzzle__vote')
-        ? on(site, 'Solved puzzle')
-        : off(site, 'Puzzle not solved yet. Solve it first, then the coach turns on.');
+      return on(site, 'Puzzle');
     }
 
     // game pages: /<8 or 12 char id>, optionally /white or /black
     if (/^\/[A-Za-z0-9]{8}(?:[A-Za-z0-9]{4})?(?:\/(?:white|black))?\/?$/.test(path)) {
-      if (doc.querySelector('.rclock.running')) {
-        return off(site, LIVE);
-      }
-
-      if (doc.querySelector('.result-wrap')) {
-        return on(site, 'Finished game');
-      }
-
-      // Lichess usernames can't contain spaces, so "Stockfish level N" is the built-in AI
-      const players = [...doc.querySelectorAll('.ruser, .ruser-top, .ruser-bottom')].map((e) => e.textContent).join(' ');
-
-      if (/Stockfish level \d/i.test(players)) {
-        return on(site, 'Vs computer');
-      }
-
-      return off(site, LIVE);
+      return on(site, 'Game');
     }
 
-    return off(site, 'Open an analysis board, a study, a finished game or a solved puzzle.');
+    return off(site, 'Open an analysis board, a study or a game.');
   };
 
   const chessComGate = (doc, path) => {
@@ -77,26 +54,18 @@
     }
 
     if (/^\/(puzzles?|daily-chess-puzzle|puzzle-rush|puzzle-battle)(\/|$)/.test(path)) {
-      return off(site, 'Puzzles are off. Use Lichess puzzles (on once solved) or an analysis board.');
+      return on(site, 'Puzzles');
     }
 
     if (/^\/game\//.test(path)) {
-      if (doc.querySelector('.clock-player-turn')) {
-        return off(site, LIVE);
-      }
-
-      if (doc.querySelector('.game-over-modal-content, .game-over-header-component, .game-over-buttons-component')) {
-        return on(site, 'Finished game');
-      }
-
-      return off(site, LIVE);
+      return on(site, 'Game');
     }
 
     if (/^\/(play|live|daily)(\/|$)/.test(path)) {
-      return off(site, LIVE);
+      return on(site, 'Game');
     }
 
-    return off(site, 'Open an analysis board, a finished game, or a game vs the computer.');
+    return off(site, 'Open an analysis board or a game.');
   };
 
   const gate = (doc = document, loc = location) => {
@@ -347,7 +316,6 @@
   const drawArrows = () => {
     if (!overlay) {
       overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      overlay.setAttribute('data-chess-coach', 'arrows');
       Object.assign(overlay.style, { position: 'fixed', pointerEvents: 'none', zIndex: 2147483646, overflow: 'visible' });
       document.documentElement.appendChild(overlay);
     }
@@ -490,9 +458,6 @@
       drawArrows();
     }
   });
-
-  // exposed for tests
-  window.__chessCoach = { gate, readBoard, toFen, snapshot };
 
   publish(true);
 })();
