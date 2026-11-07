@@ -1,4 +1,4 @@
-import { Engine } from './lib/engine.js';
+import { EnginePool } from './lib/engine.js';
 import {
   coachPosition,
   describeMistake,
@@ -7,6 +7,7 @@ import {
   findPositionBetween,
   isPlausiblePosition,
   lineAfterFirstMove,
+  lineCp,
   mistakeCandidates,
   nullMoveFen,
   overallAccuracy,
@@ -19,7 +20,8 @@ import { detectOpening } from './lib/openings.js';
 import { mountOpenings } from './openings-ui.js';
 
 const $ = (id) => document.getElementById(id);
-const engine = new Engine();
+// a small pool of Stockfish workers so trap/mistake probes can run in parallel after the main eval lands
+const engine = new EnginePool(3);
 
 const state = {
   tabId: null,
@@ -104,7 +106,7 @@ const renderEval = (result, thinking) => {
   $('bar-fill').style.height = `${Math.max(2, Math.min(98, share))}%`;
 };
 
-const BADGE_LABEL = { Brilliant: 'Brilliant!!', 'Only move': 'Only move', Trap: 'Trap' };
+const BADGE_LABEL = { Brilliant: 'Brilliant!!', Great: 'Great!', 'Only move': 'Only move', Trap: 'Trap' };
 
 const badges = (card) => (card?.badges || []).map((b) => el('span', { class: `badge ${b.split(' ')[0]}` }, BADGE_LABEL[b] || b));
 
@@ -362,7 +364,16 @@ const sendArrows = (result) => {
     }
 
     if (result.best && !result.human?.isBest) {
-      arrows.push({ ...sq(result.best.uci), kind: 'best' });
+      const wow = (result.best.badges || []).some((b) => ['Brilliant', 'Great', 'Only move'].includes(b));
+
+      arrows.push({ ...sq(result.best.uci), kind: wow ? 'brilliant' : 'best' });
+    } else if (result.best && result.human?.isBest) {
+      // the human IS the best; if it's also a wow-move, swap the green arrow for the gold one
+      const wow = (result.best.badges || []).some((b) => ['Brilliant', 'Great', 'Only move'].includes(b));
+
+      if (wow && arrows.length) {
+        arrows[arrows.length - 1].kind = 'brilliant';
+      }
     }
 
     if (result.threat) {
@@ -384,6 +395,9 @@ const sendArrows = (result) => {
 const analyzeFen = async (fen) => {
   const seq = ++state.seq;
   const stale = () => seq !== state.seq;
+  // stop any search still running in a helper worker from the previous position — its result would
+  // be discarded by the stale check anyway, but the worker needs to free up for THIS position's probes
+  engine.cancelAll();
   const key = positionKey(fen);
   const cached = state.cache.get(key);
   const level = Number(state.settings.level);
@@ -501,18 +515,34 @@ const analyzeFen = async (fen) => {
     return;
   }
 
-  // 4) traps: do their most tempting replies to our top moves lose?
-  const traps = {};
+  // Short-circuit: when the position is already decided (forced mate, or eval beyond ±4.00), the
+  // trap/mistake probes don't teach anything useful and just burn seconds. Skip straight to the final
+  // render with empty traps/mistake.
+  const best = deep[0];
+  const decidedByEval = Math.abs(lineCp(best)) > 400 && Math.abs(lineCp(best)) < 90000;
+  const decidedByMate = best.mate !== null && best.mate !== undefined;
+
+  if (decidedByEval || decidedByMate) {
+    const data = { deep, shallow, nullLine, traps: {}, mistake: null };
+
+    cacheSet(key, data);
+    show(data);
+
+    return;
+  }
+
+  // 4) traps and 5) tempting mistakes — both are independent probe batches that only depend on `deep`.
+  // Run them in parallel across the pool; each batch's candidates also run in parallel.
   const basic = /Basic engine/.test(engine.name || '');
   const candidates = [...new Set(deep.slice(0, basic ? 2 : 3).map((l) => l.pv[0]))];
 
-  for (const uci of candidates) {
+  const trapsPromise = Promise.all(candidates.map(async (uci) => {
     const line = deep.find((l) => l.pv[0] === uci);
     const afterOurs = playUci(fen, uci)?.chess.fen();
 
     for (const reply of temptingReplies(fen, uci, basic ? 2 : 3)) {
       if (stale()) {
-        return;
+        return null;
       }
 
       const afterReply = afterOurs ? playUci(afterOurs, reply.uci)?.chess.fen() : null;
@@ -525,20 +555,14 @@ const analyzeFen = async (fen) => {
       const trap = describeTrap(fen, line, reply, punish);
 
       if (trap) {
-        traps[uci] = trap;
-        break;
+        return [uci, trap];
       }
     }
-  }
 
-  if (stale()) {
-    return;
-  }
+    return null;
+  }));
 
-  // 5) tempting mistakes: the most natural-looking moves that aren't among the good ones, checked one by one
-  let mistake = null;
-
-  for (const candidate of mistakeCandidates(fen, deep, shallow, basic ? 2 : 4)) {
+  const mistakesPromise = Promise.all(mistakeCandidates(fen, deep, shallow, basic ? 2 : 4).map(async (candidate) => {
     let reply = lineAfterFirstMove(candidate.known);
 
     if (!reply) {
@@ -547,16 +571,25 @@ const analyzeFen = async (fen) => {
       reply = after ? (await engine.analyze(after, { multipv: 1, depth: basic ? 6 : 11 }))?.[0] || null : null;
     }
 
-    if (stale()) {
-      return;
+    if (stale() || !reply) {
+      return null;
     }
 
-    mistake = describeMistake(fen, candidate.uci, reply, deep[0]);
+    return describeMistake(fen, candidate.uci, reply, deep[0]);
+  }));
 
-    if (mistake) {
-      break;
-    }
+  const [trapResults, mistakeResults] = await Promise.all([trapsPromise, mistakesPromise]);
+
+  if (stale()) {
+    return;
   }
+
+  const traps = {};
+
+  trapResults.filter(Boolean).forEach(([uci, trap]) => { traps[uci] = trap; });
+
+  // the mistakes array came out in candidate-order (most tempting first) — take the first that qualified
+  const mistake = mistakeResults.find(Boolean) || null;
 
   const data = { deep, shallow, nullLine, traps, mistake };
 

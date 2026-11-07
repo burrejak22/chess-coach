@@ -347,10 +347,10 @@
     };
 
     // green = human move, blue = engine best, orange dotted = tempting mistake, red dashed = their threat
-    const colors = { human: '#2e9e5b', best: '#2f6fd6', mistake: '#e8871e', threat: '#d64545' };
+    const colors = { human: '#2e9e5b', best: '#2f6fd6', mistake: '#8b5cf6', threat: '#d64545', brilliant: '#d4a017' };
     const dashes = { threat: `${sq * 0.2} ${sq * 0.15}`, mistake: `${sq * 0.01} ${sq * 0.24}` };
     // later arrows are drawn on top: the move we recommend should never be hidden by the others
-    const layer = { mistake: 0, threat: 1, best: 2, human: 3 };
+    const layer = { mistake: 0, threat: 1, best: 2, human: 3, brilliant: 4 };
     let svg = '<defs>';
 
     Object.entries(colors).forEach(([key, color]) => {
