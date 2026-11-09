@@ -15,6 +15,15 @@
   const FILES = 'abcdefgh';
   const ROLE = { pawn: 'p', knight: 'n', bishop: 'b', rook: 'r', queen: 'q', king: 'k' };
 
+  // Unicode escapes so the icons can never be mangled by file encoding: ♞ ▲ ▼ – ✕
+  const ICON = {
+    knight: '\u265E',
+    up: '\u25B2',
+    down: '\u25BC',
+    min: '\u2013',
+    close: '\u2715',
+  };
+
   // ---------------------------------------------------------------------------------------------
   // page gate: on for studies, analysis, puzzles and all games (live or finished).
   // Anything not recognised stays off, so a site redesign fails safe.
@@ -151,10 +160,6 @@
         moving = true;
       }
 
-      if (cls.contains('anim')) {
-        return;
-      }
-
       if (cls.contains('ghost') || cls.contains('fading') || cls.contains('dragging')) {
         return;
       }
@@ -191,7 +196,6 @@
       }
 
       const file = parseInt(cls[7], 10) - 1;
-
       const rank = parseInt(cls[8], 10);
 
       return file >= 0 && file < 8 && rank >= 1 && rank <= 8 ? `${FILES[file]}${rank}` : null;
@@ -475,9 +479,9 @@
 
     ui.sheet.hidden = sheetSize === 'closed';
     ui.sheet.dataset.size = sheetSize;
-    // the button only shows where the coach can run, so it never sits on a live game
+    // the button only shows where the coach can run
     ui.launcher.hidden = sheetSize !== 'closed' || !currentGate.allowed;
-    ui.full.textContent = sheetSize === 'full' ? 'â¾' : 'â´';
+    ui.full.textContent = sheetSize === 'full' ? ICON.down : ICON.up;
     ui.full.setAttribute('aria-label', sheetSize === 'full' ? 'Smaller' : 'Bigger');
   };
 
@@ -503,13 +507,13 @@
     const root = host.attachShadow({ mode: 'closed' });
 
     root.innerHTML = `<style>${SHEET_CSS}</style>
-      <button type="button" class="launcher" aria-label="Open Chess Coach" hidden>â¢</button>
+      <button type="button" class="launcher" aria-label="Open Chess Coach" hidden>${ICON.knight}</button>
       <div class="sheet" hidden>
         <div class="bar">
           <button type="button" class="title">Chess Coach</button>
-          <button type="button" class="full" aria-label="Bigger">â´</button>
-          <button type="button" class="min" aria-label="Minimize">â</button>
-          <button type="button" class="close" aria-label="Close">â</button>
+          <button type="button" class="full" aria-label="Bigger">${ICON.up}</button>
+          <button type="button" class="min" aria-label="Minimize">${ICON.min}</button>
+          <button type="button" class="close" aria-label="Close">${ICON.close}</button>
         </div>
         <iframe title="Chess Coach"></iframe>
       </div>`;
