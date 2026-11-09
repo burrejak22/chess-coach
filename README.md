@@ -57,6 +57,30 @@ games. `test/mock-pages.mjs` builds fake pages from any FEN for the browser test
 
 Stockfish is already included in `engine\`, so there is nothing else to install.
 
+## How the typical move is chosen
+
+It mixes three things, weighted by the "Play like" rating (now 800 up to 3000):
+
+1. **Real opening statistics.** In the most common openings (1.e4 / 1.d4, the Open Games, Italian, Ruy Lopez,
+   Petrov) the shares come from Lichess blitz and rapid games at that rating, as published by Chessiverse's "Move
+   Trends by Rating", interpolated between 400 and 2500. E.g. against 1.e4, 1...e5 is the most common reply at
+   1500 and the Sicilian takes over around 2000; in the Ruy Lopez 5...Be7 goes from about 5% at 400 to 56% at 2500.
+   The card says when the numbers come from games.
+2. **How people choose moves** (everywhere else), from chess-psychology research and coaching literature:
+   - the forcing-move scan (checks, captures, threats) that most players start with; weaker players capture
+     more often, and are drawn more to checks;
+   - "hope chess" at club level: not checking the opponent's replies, so moves that drop material aren't
+     ruled out as firmly; stronger players rarely ignore a loose piece;
+   - blind spots even strong players share: backward diagonal moves, backward knight moves, long moves;
+   - opening knowledge: the stronger the player, the more they follow theory;
+   - taking back, saving attacked pieces, developing, castling, and what a quick calculation finds.
+3. **The engine.** Stronger players match the engine's first choice more often: about 46% at 2000, rising
+   about 1.5 points per 100 Elo to about 58% at 2800 (Ken Regan's data on FIDE-rated games). The engine's
+   ranking is mixed in so the engine's first choice gets roughly that share at the chosen rating.
+
+The model is an estimate of what players do, not a replay of real games; only the opening statistics are counted
+from games.
+
 ## iPhone
 
 There's no side panel on iPhone, so there the panel slides up from the bottom of the Lichess / Chess.com page

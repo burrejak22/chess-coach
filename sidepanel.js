@@ -271,7 +271,9 @@ const renderMoves = (result) => {
     typical.others?.length
       ? el('div', { class: 'plan' }, 'Also common: ', typical.others.map((o, i) => [i ? ', ' : '', el('b', {}, o.san), ` (${pct(o.share)})`]))
       : null,
-    el('div', { class: 'muted small' }, 'Estimated from how players think, not from game statistics.'),
+    el('div', { class: 'muted small' }, typical.source === 'games'
+      ? `Shares from Lichess games at about your "Play like" rating.`
+      : 'Estimated from how players at this rating choose moves, not counted from games.'),
   ] : []);
 
   fill('mistake', mistake && state.settings.mistakes ? [
@@ -538,7 +540,7 @@ const analyzeFen = async (fen) => {
   // the typical move card: the most likely move with the engine's verdict once we have one
   const typicalFrom = (reply = null, bestLine = null) => (picks.length ? {
     ...describeTypical(fen, picks[0], reply, bestLine, lastMove),
-    others: picks.slice(1).map((p) => ({ san: p.san, share: p.share })),
+    others: picks.slice(1).map((p) => ({ san: p.san, share: p.share, source: p.source })),
   } : null);
 
   // a partial entry only has the main search (no traps etc.), so the position is searched again
@@ -594,6 +596,8 @@ const analyzeFen = async (fen) => {
     return;
   }
 
+  // with the engine's lines in hand, stronger players' choices lean toward the engine's (see typicalMoves)
+  picks = typicalMoves(fen, { shallowLines: shallow, deepLines: deep, level, lastMove, book: bookMoves(fen) });
   const typicalKnown = deep.find((l) => l.pv[0] === picks[0]?.uci);
   const flip = (v) => (v === null || v === undefined ? null : -v);
   let typical = typicalFrom(typicalKnown
