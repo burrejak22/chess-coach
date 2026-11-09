@@ -2,6 +2,10 @@
 // It never makes moves; it only reads the position and draws arrows the side panel asks for.
 
 (() => {
+  // some iPhone browsers only provide the extension API as `browser`
+  // eslint-disable-next-line no-shadow
+  const chrome = globalThis.chrome?.runtime?.getURL ? globalThis.chrome : globalThis.browser;
+
   if (window.__chessCoachLoaded) {
     return;
   }
@@ -562,15 +566,27 @@
   });
 
   const startInPagePanel = async () => {
+    // phones never have a side panel, so don't wait on the background script: in some iPhone browsers
+    // (Orion) it may never answer
+    if (isPhone()) {
+      inPage = true;
+      buildPanel();
+
+      return;
+    }
+
     let answer = null;
 
     try {
-      answer = await chrome.runtime.sendMessage({ type: 'cc:mode' });
+      answer = await Promise.race([
+        chrome.runtime.sendMessage({ type: 'cc:mode' }),
+        new Promise((resolve) => { setTimeout(() => resolve(null), 1500); }),
+      ]);
     } catch {
-      // no answer from the background (some iPhone browsers): decide from the device
+      // no background script answering: a desktop browser without one keeps the old behaviour
     }
 
-    inPage = typeof answer?.inPage === 'boolean' ? answer.inPage : isPhone();
+    inPage = answer?.inPage === true;
 
     if (inPage) {
       buildPanel();

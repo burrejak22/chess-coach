@@ -1,4 +1,8 @@
 import { EnginePool } from './lib/engine.js';
+
+// some iPhone browsers only provide the extension API as `browser`
+// eslint-disable-next-line no-shadow
+const chrome = globalThis.chrome?.runtime?.getURL ? globalThis.chrome : globalThis.browser;
 import {
   coachPosition,
   describeMistake,
@@ -781,11 +785,28 @@ if (EMBEDDED) {
 // ---------------------------------------------------------------------------------------------
 
 const bindSettings = async () => {
-  const saved = await chrome.storage.local.get(['level', 'think', 'arrows', 'mistakes', 'puzzle', 'turn']);
+  // saved settings, but never wait long for them: some iPhone browsers don't answer storage calls,
+  // and the defaults are fine
+  let saved = {};
+
+  try {
+    saved = await Promise.race([
+      chrome.storage.local.get(['level', 'think', 'arrows', 'mistakes', 'puzzle', 'turn']),
+      new Promise((resolve) => { setTimeout(() => resolve({}), 1500); }),
+    ]) || {};
+  } catch {
+    saved = {};
+  }
 
   Object.assign(state.settings, Object.fromEntries(Object.entries(saved).filter(([, v]) => v !== undefined)));
 
-  const save = () => chrome.storage.local.set(state.settings);
+  const save = () => {
+    try {
+      chrome.storage.local.set(state.settings)?.catch?.(() => {});
+    } catch {
+      // settings just won't be remembered
+    }
+  };
 
   $('level').value = String(state.settings.level);
   $('think').value = String(state.settings.think);
