@@ -1,3 +1,6 @@
+// Chess Coach content script: reads the board on Lichess & Chess.com.
+// It never makes moves; it only reads the position and draws arrows the side panel asks for.
+
 (() => {
   if (window.__chessCoachLoaded) {
     return;
@@ -9,11 +12,13 @@
   const ROLE = { pawn: 'p', knight: 'n', bishop: 'b', rook: 'r', queen: 'q', king: 'k' };
 
   // ---------------------------------------------------------------------------------------------
-  // page gate: on for any recognisable board, unknown pages stay off so a site redesign fails safe
+  // page gate: on for study pages, off during live/daily games and unsolved puzzles.
+  // Anything not recognised stays off, so a site redesign fails safe.
   // ---------------------------------------------------------------------------------------------
 
   const on = (site, mode) => ({ site, allowed: true, mode });
   const off = (site, reason) => ({ site, allowed: false, reason });
+  const LIVE = 'Live game in progress. The coach turns back on when the game ends.';
 
   const lichessGate = (doc, path) => {
     const site = 'Lichess';
@@ -31,15 +36,33 @@
     }
 
     if (/^\/training(\/|$)/.test(path)) {
-      return on(site, 'Puzzle');
+      // after a puzzle is finished Lichess shows the "after" feedback / vote panel
+      return doc.querySelector('.puzzle__feedback.after, .puzzle__vote')
+        ? on(site, 'Solved puzzle')
+        : off(site, 'Puzzle not solved yet. Solve it first, then the coach turns on.');
     }
 
     // game pages: /<8 or 12 char id>, optionally /white or /black
     if (/^\/[A-Za-z0-9]{8}(?:[A-Za-z0-9]{4})?(?:\/(?:white|black))?\/?$/.test(path)) {
-      return on(site, 'Game');
+      if (doc.querySelector('.rclock.running')) {
+        return off(site, LIVE);
+      }
+
+      if (doc.querySelector('.result-wrap')) {
+        return on(site, 'Finished game');
+      }
+
+      // Lichess usernames can't contain spaces, so "Stockfish level N" is the built-in AI
+      const players = [...doc.querySelectorAll('.ruser, .ruser-top, .ruser-bottom')].map((e) => e.textContent).join(' ');
+
+      if (/Stockfish level \d/i.test(players)) {
+        return on(site, 'Vs computer');
+      }
+
+      return off(site, LIVE);
     }
 
-    return off(site, 'Open an analysis board, a study or a game.');
+    return off(site, 'Open an analysis board, a study, a finished game or a solved puzzle.');
   };
 
   const chessComGate = (doc, path) => {
@@ -54,18 +77,26 @@
     }
 
     if (/^\/(puzzles?|daily-chess-puzzle|puzzle-rush|puzzle-battle)(\/|$)/.test(path)) {
-      return on(site, 'Puzzles');
+      return off(site, 'Puzzles are off. Use Lichess puzzles (on once solved) or an analysis board.');
     }
 
     if (/^\/game\//.test(path)) {
-      return on(site, 'Game');
+      if (doc.querySelector('.clock-player-turn')) {
+        return off(site, LIVE);
+      }
+
+      if (doc.querySelector('.game-over-modal-content, .game-over-header-component, .game-over-buttons-component')) {
+        return on(site, 'Finished game');
+      }
+
+      return off(site, LIVE);
     }
 
     if (/^\/(play|live|daily)(\/|$)/.test(path)) {
-      return on(site, 'Game');
+      return off(site, LIVE);
     }
 
-    return off(site, 'Open an analysis board or a game.');
+    return off(site, 'Open an analysis board, a finished game, or a game vs the computer.');
   };
 
   const gate = (doc = document, loc = location) => {
@@ -316,6 +347,7 @@
   const drawArrows = () => {
     if (!overlay) {
       overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      overlay.setAttribute('data-chess-coach', 'arrows');
       Object.assign(overlay.style, { position: 'fixed', pointerEvents: 'none', zIndex: 2147483646, overflow: 'visible' });
       document.documentElement.appendChild(overlay);
     }
@@ -404,6 +436,147 @@
     };
   };
 
+  // ---------------------------------------------------------------------------------------------
+  // In-page panel, for browsers without a side panel (Safari and Orion on iPhone). Desktop Chrome
+  // never builds any of this: the background script tells us which mode we're in.
+  // The panel is the same sidepanel.html in an iframe that slides up from the bottom, and it talks to
+  // this script with postMessage.
+  // ---------------------------------------------------------------------------------------------
+
+  const PANEL_ORIGIN = new URL(chrome.runtime.getURL('')).origin;
+  let inPage = false;
+  let ui = null; // { launcher, sheet, frame }
+  let sheetSize = 'closed'; // closed | half | full | min
+
+  const isPhone = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+  const SHEET_CSS = `
+    .launcher { position: fixed; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 2147483646;
+      width: 50px; height: 50px; border-radius: 50%; border: 0; padding: 0; background: #2e9e5b; color: #fff;
+      font: 28px/50px system-ui, -apple-system, sans-serif; text-align: center; box-shadow: 0 4px 14px rgba(0,0,0,.35);
+      cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    .launcher[hidden], .sheet[hidden] { display: none; }
+    .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483647; display: flex; flex-direction: column;
+      height: 50vh; height: 50dvh; background: #f6f5f1; border-radius: 14px 14px 0 0; overflow: hidden;
+      box-shadow: 0 -6px 24px rgba(0,0,0,.3); padding-bottom: env(safe-area-inset-bottom, 0px); transition: height .2s ease; }
+    .sheet[data-size="full"] { height: 88vh; height: 88dvh; }
+    .sheet[data-size="min"] { height: calc(44px + env(safe-area-inset-bottom, 0px)); }
+    .bar { flex: 0 0 44px; display: flex; align-items: center; border-bottom: 1px solid rgba(0,0,0,.12); }
+    .bar button { all: unset; box-sizing: border-box; height: 44px; padding: 0 14px; cursor: pointer; color: #1f2328;
+      font: 600 15px/44px system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+    .bar .title { flex: 1; }
+    .bar .title::before { content: ''; display: inline-block; width: 34px; height: 5px; margin-right: 10px; border-radius: 3px;
+      vertical-align: middle; background: rgba(0,0,0,.25); }
+    iframe { flex: 1; width: 100%; border: 0; background: transparent; }
+    .sheet[data-size="min"] iframe { visibility: hidden; }
+    @media (prefers-color-scheme: dark) {
+      .sheet { background: #1c1d20; } .bar { border-color: rgba(255,255,255,.12); } .bar button { color: #e9e9ea; }
+      .bar .title::before { background: rgba(255,255,255,.3); }
+    }`;
+
+  const toPanel = (message) => {
+    if (ui?.frame.contentWindow && sheetSize !== 'closed') {
+      ui.frame.contentWindow.postMessage({ __cc: true, ...message }, PANEL_ORIGIN);
+    }
+  };
+
+  const render = () => {
+    if (!ui) {
+      return;
+    }
+
+    ui.sheet.hidden = sheetSize === 'closed';
+    ui.sheet.dataset.size = sheetSize;
+    // the button only shows where the coach can run, so it never sits on a live game
+    ui.launcher.hidden = sheetSize !== 'closed' || !currentGate.allowed;
+    ui.full.textContent = sheetSize === 'full' ? '▾' : '▴';
+    ui.full.setAttribute('aria-label', sheetSize === 'full' ? 'Smaller' : 'Bigger');
+  };
+
+  const setSize = (next) => {
+    if (next === 'closed') {
+      // unloading the panel stops the engine, which saves battery
+      ui.frame.removeAttribute('src');
+    } else if (!ui.frame.getAttribute('src')) {
+      ui.frame.src = chrome.runtime.getURL('sidepanel.html?embedded=1');
+    }
+
+    sheetSize = next;
+    render();
+  };
+
+  const buildPanel = () => {
+    const host = document.createElement('div');
+
+    host.setAttribute('data-chess-coach-panel', '');
+    host.style.cssText = 'all: initial; position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 2147483646;';
+
+    // a closed shadow root keeps the site's CSS (and scripts) away from the panel's controls
+    const root = host.attachShadow({ mode: 'closed' });
+
+    root.innerHTML = `<style>${SHEET_CSS}</style>
+      <button type="button" class="launcher" aria-label="Open Chess Coach" hidden>♞</button>
+      <div class="sheet" hidden>
+        <div class="bar">
+          <button type="button" class="title">Chess Coach</button>
+          <button type="button" class="full" aria-label="Bigger">▴</button>
+          <button type="button" class="min" aria-label="Minimize">–</button>
+          <button type="button" class="close" aria-label="Close">✕</button>
+        </div>
+        <iframe title="Chess Coach"></iframe>
+      </div>`;
+
+    ui = {
+      launcher: root.querySelector('.launcher'),
+      sheet: root.querySelector('.sheet'),
+      frame: root.querySelector('iframe'),
+      full: root.querySelector('.full'),
+    };
+
+    ui.launcher.addEventListener('click', () => setSize('half'));
+    root.querySelector('.title').addEventListener('click', () => setSize(sheetSize === 'min' ? 'half' : (sheetSize === 'full' ? 'half' : 'full')));
+    ui.full.addEventListener('click', () => setSize(sheetSize === 'full' ? 'half' : 'full'));
+    root.querySelector('.min').addEventListener('click', () => setSize(sheetSize === 'min' ? 'half' : 'min'));
+    root.querySelector('.close').addEventListener('click', () => setSize('closed'));
+
+    document.documentElement.appendChild(host);
+    render();
+  };
+
+  // the panel asks for the board and sends arrows; only messages from our own iframe count
+  window.addEventListener('message', (event) => {
+    if (!ui || event.source !== ui.frame.contentWindow || event.origin !== PANEL_ORIGIN || !event.data?.__cc) {
+      return;
+    }
+
+    const { data } = event;
+
+    if (data.type === 'cc:request') {
+      ui.frame.contentWindow.postMessage({ __cc: true, type: 'cc:snapshot', id: data.id, snapshot: snapshot() }, PANEL_ORIGIN);
+      publish(true);
+    } else if (data.type === 'cc:arrows') {
+      arrows = currentGate.allowed ? (data.arrows || []) : [];
+      drawArrows();
+    }
+  });
+
+  const startInPagePanel = async () => {
+    let answer = null;
+
+    try {
+      answer = await chrome.runtime.sendMessage({ type: 'cc:mode' });
+    } catch {
+      // no answer from the background (some iPhone browsers): decide from the device
+    }
+
+    inPage = typeof answer?.inPage === 'boolean' ? answer.inPage : isPhone();
+
+    if (inPage) {
+      buildPanel();
+    }
+  };
+
   const publish = (force = false) => {
     const message = snapshot();
 
@@ -422,6 +595,7 @@
     }
 
     drawArrows();
+    render();
 
     if (!force && key === lastSent) {
       return;
@@ -434,6 +608,8 @@
     } catch {
       // the extension was reloaded; this script is orphaned
     }
+
+    toPanel(message);
   };
 
   const schedule = () => {
@@ -456,8 +632,15 @@
     } else if (message?.type === 'cc:arrows') {
       arrows = currentGate.allowed ? (message.arrows || []) : [];
       drawArrows();
+    } else if (message?.type === 'cc:toggle-panel' && ui) {
+      // the extension's entry in the browser menu (Safari) opens or closes the in-page panel
+      setSize(sheetSize === 'closed' ? 'half' : 'closed');
     }
   });
 
+  // exposed for tests
+  window.__chessCoach = { gate, readBoard, toFen, snapshot };
+
   publish(true);
+  startInPagePanel();
 })();

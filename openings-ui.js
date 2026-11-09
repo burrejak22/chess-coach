@@ -4,6 +4,17 @@
 import { Chess } from './lib/chess.js';
 import { OPENINGS, formatMoves, lichessAnalysisUrl, playLine } from './lib/openings.js';
 
+// Chrome opens a new tab through the extension; inside the iPhone in-page panel that may not be allowed
+const openTab = (url) => {
+  const fallback = () => window.open(url, '_blank', 'noopener');
+
+  try {
+    (chrome.tabs?.create ? chrome.tabs.create({ url }) : Promise.reject()).catch(fallback);
+  } catch {
+    fallback();
+  }
+};
+
 const GLYPHS = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
   bk: '♚', bq: '♛', br: '♜', bb: '♝', bn: '♞', bp: '♟',
@@ -119,7 +130,7 @@ export const mountOpenings = (root, { el, getRating }) => {
           el('button', { type: 'button', class: 'btn', onclick: () => go(view.ply - 1) }, '◀'),
           el('button', { type: 'button', class: 'btn primary', onclick: () => go(view.ply + 1) }, 'Next ▶'),
           el('button', { type: 'button', class: 'btn', onclick: () => go(steps.length - 1) }, '⏭'),
-          el('button', { type: 'button', class: 'btn', onclick: () => chrome.tabs.create({ url: lichessAnalysisUrl(fen) }) }, 'Open on Lichess'),
+          el('button', { type: 'button', class: 'btn', onclick: () => openTab(lichessAnalysisUrl(fen)) }, 'Open on Lichess'),
         ),
         el('div', { class: 'moves' }, moveButtons),
         el('div', { class: 'note' }, note || ''),

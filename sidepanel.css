@@ -96,3 +96,6 @@ footer { margin-top: 6px; display: grid; gap: 2px; }
 .dot { width: 9px; height: 9px; border-radius: 2px; background: var(--muted); }
 .dot.Best { background: var(--human); } .dot.Good { background: color-mix(in srgb, var(--human) 55%, var(--card)); }
 .dot.Inaccuracy { background: var(--warn); } .dot.Mistake { background: var(--mistake); outline: 1px solid var(--threat); } .dot.Blunder { background: var(--threat); }
+/* inside the page on a phone: a bit tighter, and the header is already shown by the sheet */
+.embedded body { padding: 8px 10px 16px; }
+.embedded header.top .brand { display: none; }

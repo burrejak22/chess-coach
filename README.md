@@ -50,11 +50,43 @@ games. `test/mock-pages.mjs` builds fake pages from any FEN for the browser test
 
 Stockfish is already included in `engine\`, so there is nothing else to install.
 
+## iPhone
+
+There's no side panel on iPhone, so there the panel slides up from the bottom of the Lichess / Chess.com page
+instead. A green **♞** button in the bottom-right corner opens it (it only shows where the coach is allowed to
+run, never in a live game). The bar on top of the panel has **▴** (bigger / smaller), **–** (tuck it away while
+it keeps analysing) and **✕** (close it; that also stops the engine to save battery). On phones it runs one
+Stockfish worker with a small hash table, since iOS closes extensions that use a lot of memory. Desktop Chrome
+is unchanged.
+
+Two ways to install it:
+
+**Orion browser (no Mac needed).** Orion is a free iPhone browser from Kagi that can run Chrome extensions.
+Its extension support is still in beta, so some things may not work.
+1. Install **Orion Browser by Kagi** from the App Store.
+2. Get the iPhone zip (`chess-coach-iphone-v0.5.0.zip`) onto the phone, e.g. save it to the Files app.
+3. In Orion: **•••** > **Extensions** > **+** and pick the zip. If it asks, first turn on installing
+   third-party extensions in Orion's settings.
+4. Open lichess.org in Orion and tap the **♞** button.
+
+**Safari (needs a Mac with Xcode).** Apple only installs Safari extensions as part of an app.
+1. On the Mac: `sh scripts/build-ios.sh`, then follow what it prints (open the Xcode project, choose your Apple
+   ID under Signing, plug in the iPhone, press Run).
+2. On the iPhone: **Settings > Apps > Safari > Extensions > Chess Coach**, turn it on and allow it on lichess.org
+   and chess.com.
+3. In Safari, open lichess.org and tap the **♞** button (or the extension in Safari's menu).
+With a free Apple ID the app has to be re-run from Xcode every 7 days; a paid developer account ($99/year) lasts
+a year and allows TestFlight.
+
+To try the iPhone layout in desktop Chrome, run `chrome.storage.local.set({ forceInPagePanel: true })` in the
+extension's service worker console and reload the page.
+
 ## Development
 
 - `npm test`: all the logic tests (whose turn, coach, tactics, tempting mistakes, and every opening line and trap
   move by move). They use the built-in backup engine, so they run without a browser.
-- `npm run test:browser`: loads the extension in Chrome against fake Lichess / Chess.com pages. Needs Playwright;
+- `npm run test:browser`: loads the extension in Chrome against fake Lichess / Chess.com pages, on desktop and
+  in the iPhone layout (`test/iphone.test.mjs`, Chrome pretending to be an iPhone). Needs Playwright;
   set `CHROME=/path/to/chrome` and/or `PLAYWRIGHT=/path/to/playwright` if they aren't in the default places.
   `SHOT=out/panel.png` also saves screenshots.
 

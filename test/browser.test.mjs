@@ -193,7 +193,7 @@ const mistakeCard = await panel.evaluate(() => (document.getElementById('mistake
 console.log('\n--- tempting mistake ---\n', mistakeCard, '\n');
 check('panel shows a tempting mistake with why & what goes wrong', /Why it's tempting/.test(mistakeCard || '') && /What goes wrong/.test(mistakeCard || ''), mistakeCard);
 const kinds = await lichess.evaluate(() => [...document.querySelectorAll('svg[data-chess-coach] line')].map((l) => [l.dataset.kind, l.getAttribute('stroke')]));
-check('orange mistake arrow drawn', kinds.some(([k, c]) => k === 'mistake' && c === '#e8871e'), kinds);
+check('purple mistake arrow drawn', kinds.some(([k, c]) => k === 'mistake' && c === '#8b5cf6'), kinds);
 if (process.env.SHOT) {
   await panel.screenshot({ path: process.env.SHOT.replace('.png', '-mistake.png'), fullPage: true });
   await lichess.screenshot({ path: process.env.SHOT.replace('.png', '-mistake-board.png') });

@@ -20,8 +20,54 @@ import { detectOpening } from './lib/openings.js';
 import { mountOpenings } from './openings-ui.js';
 
 const $ = (id) => document.getElementById(id);
-// a small pool of Stockfish workers so trap/mistake probes can run in parallel after the main eval lands
-const engine = new EnginePool(3);
+
+// Inside the page (iPhone: Safari / Orion have no side panel) the panel is an iframe that talks to the
+// page's content script with postMessage. In Chrome's side panel nothing here changes.
+const EMBEDDED = new URLSearchParams(location.search).get('embedded') === '1';
+const PHONE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+// a small pool of Stockfish workers so trap/mistake probes can run in parallel after the main eval lands.
+// Phones get one worker with a small hash table: iOS closes extensions that use a lot of memory.
+const engine = PHONE ? new EnginePool(1, { hash: 16 }) : new EnginePool(3);
+
+if (EMBEDDED) {
+  document.documentElement.classList.add('embedded');
+}
+
+const PAGE_ORIGINS = ['https://lichess.org', 'https://www.chess.com'];
+const pageOrigin = () => {
+  const origin = location.ancestorOrigins?.[0] || (document.referrer ? new URL(document.referrer).origin : '');
+
+  return PAGE_ORIGINS.includes(origin) ? origin : '*';
+};
+const pending = new Map();
+let requestId = 0;
+
+/** Sends a message to the board's content script (Chrome: through the tabs API; in-page: postMessage). */
+const tabSend = (message) => {
+  if (!EMBEDDED) {
+    return chrome.tabs.sendMessage(state.tabId, message);
+  }
+
+  if (message.type !== 'cc:request') {
+    window.parent.postMessage({ __cc: true, ...message }, pageOrigin());
+
+    return Promise.resolve();
+  }
+
+  const id = ++requestId;
+
+  return new Promise((resolve, reject) => {
+    pending.set(id, resolve);
+    window.parent.postMessage({ __cc: true, ...message, id }, pageOrigin());
+    setTimeout(() => {
+      if (pending.delete(id)) {
+        reject(new Error('the page didn\'t answer'));
+      }
+    }, 4000);
+  });
+};
 
 const state = {
   tabId: null,
@@ -385,7 +431,7 @@ const sendArrows = (result) => {
     }
   }
 
-  chrome.tabs.sendMessage(state.tabId, { type: 'cc:arrows', arrows }).catch(() => {});
+  tabSend({ type: 'cc:arrows', arrows }).catch(() => {});
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -668,7 +714,8 @@ $('tab-openings').addEventListener('click', () => { openings.refresh(); showTab(
 const forcedTab = Number(new URLSearchParams(location.search).get('tab')) || null;
 
 const requestBoard = async () => {
-  const [tab] = forcedTab ? [{ id: forcedTab }] : await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = EMBEDDED ? [{ id: 'page' }]
+    : forcedTab ? [{ id: forcedTab }] : await chrome.tabs.query({ active: true, currentWindow: true });
   const newTab = (tab?.id ?? null) !== state.tabId;
 
   state.tabId = tab?.id ?? null;
@@ -684,7 +731,7 @@ const requestBoard = async () => {
   }
 
   try {
-    const snapshot = await chrome.tabs.sendMessage(state.tabId, { type: 'cc:request' });
+    const snapshot = await tabSend({ type: 'cc:request' });
 
     if (snapshot) {
       onBoard(snapshot);
@@ -700,16 +747,34 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 });
 
-chrome.tabs.onActivated.addListener(() => {
-  if (!forcedTab) {
-    requestBoard();
-  }
-});
-chrome.tabs.onUpdated.addListener((tabId, info) => {
-  if (tabId === state.tabId && info.status === 'complete') {
-    requestBoard();
-  }
-});
+if (EMBEDDED) {
+  // the page's content script answers requests and sends each new board
+  window.addEventListener('message', (event) => {
+    if (event.source !== window.parent || !event.data?.__cc) {
+      return;
+    }
+
+    const { data } = event;
+
+    if (data.type === 'cc:snapshot') {
+      pending.get(data.id)?.(data.snapshot);
+      pending.delete(data.id);
+    } else if (data.type === 'cc:board') {
+      onBoard(data);
+    }
+  });
+} else {
+  chrome.tabs.onActivated.addListener(() => {
+    if (!forcedTab) {
+      requestBoard();
+    }
+  });
+  chrome.tabs.onUpdated.addListener((tabId, info) => {
+    if (tabId === state.tabId && info.status === 'complete') {
+      requestBoard();
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------------------------
 // settings
