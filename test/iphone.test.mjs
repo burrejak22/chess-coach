@@ -91,6 +91,8 @@ check('panel analyses the position', ready && /Analysis/.test(panel.status) && /
 check('panel uses the compact in-page layout', panel?.embedded === true, panel);
 const lines = await waitFor(() => page.evaluate(() => document.querySelectorAll('svg[data-chess-coach] line').length));
 check('arrows are drawn on the board from the in-page panel', lines >= 1, lines);
+const typicalBand = await waitFor(() => page.evaluate(() => document.querySelectorAll('svg[data-chess-coach] line[data-kind="typical"]').length), 30000);
+check('typical-move band shows on the phone too', typicalBand === 1, typicalBand);
 
 const box = async () => (await (await frame.frameElement()).boundingBox()) || {};
 const half = await box();

@@ -194,6 +194,10 @@ console.log('\n--- tempting mistake ---\n', mistakeCard, '\n');
 check('panel shows a tempting mistake with why & what goes wrong', /Why it's tempting/.test(mistakeCard || '') && /What goes wrong/.test(mistakeCard || ''), mistakeCard);
 const kinds = await lichess.evaluate(() => [...document.querySelectorAll('svg[data-chess-coach] line')].map((l) => [l.dataset.kind, l.getAttribute('stroke')]));
 check('purple mistake arrow drawn', kinds.some(([k, c]) => k === 'mistake' && c === '#8b5cf6'), kinds);
+check('cyan typical-move band drawn under the other arrows', kinds.some(([k, c]) => k === 'typical' && c === '#0ea5b7'), kinds);
+const typicalCard = await panel.evaluate(() => (document.getElementById('typical').hidden ? null : document.getElementById('typical').innerText));
+console.log('\n--- typical move ---\n', typicalCard, '\n');
+check('panel shows the typical move with a share and a verdict', /of players/.test(typicalCard || '') && /(Best|Good|Inaccuracy|Mistake|Blunder)/.test(typicalCard || ''), typicalCard);
 if (process.env.SHOT) {
   await panel.screenshot({ path: process.env.SHOT.replace('.png', '-mistake.png'), fullPage: true });
   await lichess.screenshot({ path: process.env.SHOT.replace('.png', '-mistake-board.png') });

@@ -6,6 +6,7 @@ const chrome = globalThis.chrome?.runtime?.getURL ? globalThis.chrome : globalTh
 import {
   coachPosition,
   describeMistake,
+  describeTypical,
   describeTrap,
   findMoveBetween,
   findPositionBetween,
@@ -16,11 +17,12 @@ import {
   nullMoveFen,
   overallAccuracy,
   playUci,
+  typicalMoves,
   resolveTurn,
   reviewLastMove,
   temptingReplies,
 } from './lib/coach.js';
-import { detectOpening } from './lib/openings.js';
+import { bookMoves, detectOpening } from './lib/openings.js';
 import { mountOpenings } from './openings-ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -212,7 +214,7 @@ const renderMoves = (result) => {
   renderPuzzle(result);
 
   if (!result || puzzleHides(result)) {
-    ['human', 'best', 'alts', 'threat', 'mistake'].forEach((id) => fill(id));
+    ['human', 'best', 'alts', 'threat', 'mistake', 'typical'].forEach((id) => fill(id));
 
     return;
   }
@@ -246,6 +248,31 @@ const renderMoves = (result) => {
     list(best.reasons),
     best.plan?.length ? el('div', { class: 'plan' }, 'Plan: ', el('b', {}, best.plan.join(' → '))) : null,
   ]);
+
+  const { typical } = result;
+  const pct = (share) => `~${Math.max(1, Math.round(share * 100))}%`;
+
+  fill('typical', typical ? [
+    el('h3', {}, 'Typical move · what most players would play'),
+    el(
+      'div',
+      { class: 'move' },
+      el('span', { class: 'san' }, typical.san),
+      el('span', { class: 'tag' }, `${pct(typical.share)} of players`),
+      typical.grade ? el('span', { class: `grade ${typical.grade}` }, typical.grade) : null,
+      typical.eval ? el('span', { class: 'tag' }, typical.loss > 15 ? `${typical.eval} (−${(typical.loss / 100).toFixed(1)})` : typical.eval) : null,
+    ),
+    el(
+      'ul',
+      {},
+      typical.why ? el('li', {}, el('b', {}, 'Why people play it: '), typical.why) : null,
+      typical.wrong ? el('li', {}, el('b', {}, 'What goes wrong: '), typical.wrong) : null,
+    ),
+    typical.others?.length
+      ? el('div', { class: 'plan' }, 'Also common: ', typical.others.map((o, i) => [i ? ', ' : '', el('b', {}, o.san), ` (${pct(o.share)})`]))
+      : null,
+    el('div', { class: 'muted small' }, 'Estimated from how players think, not from game statistics.'),
+  ] : []);
 
   fill('mistake', mistake && state.settings.mistakes ? [
     el('h3', {}, 'Tempting mistake · what a weaker player might play'),
@@ -426,6 +453,10 @@ const sendArrows = (result) => {
       }
     }
 
+    if (result.typical) {
+      arrows.push({ from: result.typical.from, to: result.typical.to, kind: 'typical' });
+    }
+
     if (result.threat) {
       arrows.push({ from: result.threat.from, to: result.threat.to, kind: 'threat' });
     }
@@ -501,6 +532,14 @@ const analyzeFen = async (fen) => {
   };
 
   const prevFen = state.prevFen;
+  // the move that led here (for "takes back"), when we saw the position before it
+  const lastMove = prevFen && fen !== prevFen ? findMoveBetween(prevFen, fen) : null;
+  let picks = [];
+  // the typical move card: the most likely move with the engine's verdict once we have one
+  const typicalFrom = (reply = null, bestLine = null) => (picks.length ? {
+    ...describeTypical(fen, picks[0], reply, bestLine, lastMove),
+    others: picks.slice(1).map((p) => ({ san: p.san, share: p.share })),
+  } : null);
 
   // a partial entry only has the main search (no traps etc.), so the position is searched again
   if (cached?.deep?.length && !cached.partial) {
@@ -537,7 +576,8 @@ const analyzeFen = async (fen) => {
     return;
   }
 
-  show({ deep: shallow, shallow }, 'thinking…');
+  picks = typicalMoves(fen, { shallowLines: shallow, level, lastMove, book: bookMoves(fen) });
+  show({ deep: shallow, shallow, typical: typicalFrom() }, 'thinking…');
 
   // 2) what are they threatening if it were their move?
   const nf = nullMoveFen(fen);
@@ -554,10 +594,16 @@ const analyzeFen = async (fen) => {
     return;
   }
 
-  show({ deep, shallow, nullLine }, 'checking traps…');
+  const typicalKnown = deep.find((l) => l.pv[0] === picks[0]?.uci);
+  const flip = (v) => (v === null || v === undefined ? null : -v);
+  let typical = typicalFrom(typicalKnown
+    ? lineAfterFirstMove(typicalKnown) || { scoreCp: flip(typicalKnown.scoreCp), mate: flip(typicalKnown.mate), pv: [] }
+    : null, deep[0]);
+
+  show({ deep, shallow, nullLine, typical }, 'checking traps…');
 
   // the main search is enough to grade moves: do it now, so a quick reply doesn't skip this move
-  cacheSet(key, { deep, shallow, nullLine, partial: true });
+  cacheSet(key, { deep, shallow, nullLine, typical, partial: true });
   state.prevFen = fen;
   await reviewFrom(prevFen, deep);
 
@@ -573,7 +619,7 @@ const analyzeFen = async (fen) => {
   const decidedByMate = best.mate !== null && best.mate !== undefined;
 
   if (decidedByEval || decidedByMate) {
-    const data = { deep, shallow, nullLine, traps: {}, mistake: null };
+    const data = { deep, shallow, nullLine, traps: {}, mistake: null, typical };
 
     cacheSet(key, data);
     show(data);
@@ -628,7 +674,21 @@ const analyzeFen = async (fen) => {
     return describeMistake(fen, candidate.uci, reply, deep[0]);
   }));
 
-  const [trapResults, mistakeResults] = await Promise.all([trapsPromise, mistakesPromise]);
+  // the typical move: when the main search didn't cover it, a quick look at the position after it
+  const typicalPromise = (async () => {
+    if (!picks.length || typical?.grade) {
+      return typical;
+    }
+
+    const after = playUci(fen, picks[0].uci)?.chess.fen();
+    const reply = after ? (await engine.analyze(after, { multipv: 1, depth: basic ? 6 : 11 }))?.[0] || null : null;
+
+    return stale() || !reply ? typical : typicalFrom(reply, deep[0]);
+  })();
+
+  const [trapResults, mistakeResults, typicalResult] = await Promise.all([trapsPromise, mistakesPromise, typicalPromise]);
+
+  typical = typicalResult;
 
   if (stale()) {
     return;
@@ -641,7 +701,7 @@ const analyzeFen = async (fen) => {
   // the mistakes array came out in candidate-order (most tempting first) — take the first that qualified
   const mistake = mistakeResults.find(Boolean) || null;
 
-  const data = { deep, shallow, nullLine, traps, mistake };
+  const data = { deep, shallow, nullLine, traps, mistake, typical };
 
   cacheSet(key, data);
 

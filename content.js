@@ -383,14 +383,19 @@
     };
 
     // green = human move, blue = engine best, orange dotted = tempting mistake, red dashed = their threat
-    const colors = { human: '#2e9e5b', best: '#2f6fd6', mistake: '#8b5cf6', threat: '#d64545', brilliant: '#d4a017' };
+    const colors = { human: '#2e9e5b', best: '#2f6fd6', mistake: '#8b5cf6', threat: '#d64545', brilliant: '#d4a017', typical: '#0ea5b7' };
     const dashes = { threat: `${sq * 0.2} ${sq * 0.15}`, mistake: `${sq * 0.01} ${sq * 0.24}` };
     // later arrows are drawn on top: the move we recommend should never be hidden by the others
-    const layer = { mistake: 0, threat: 1, best: 2, human: 3, brilliant: 4 };
+    const layer = { typical: -1, mistake: 0, threat: 1, best: 2, human: 3, brilliant: 4 };
+    // the typical move is a wide see-through band under everything, so it still shows when it's the same
+    // move as another arrow
+    const width = { typical: 0.38 };
+    const opacity = { typical: 0.5 };
+    const head = { typical: 1.9 };
     let svg = '<defs>';
 
     Object.entries(colors).forEach(([key, color]) => {
-      svg += `<marker id="cc-head-${key}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${color}"/></marker>`;
+      svg += `<marker id="cc-head-${key}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="${head[key] || 3}" markerHeight="${head[key] || 3}" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${color}"/></marker>`;
     });
 
     svg += '</defs>';
@@ -409,7 +414,7 @@
       const ey = y2 - (((y2 - y1) / len) * shorten);
       const dash = dashes[kind] ? `stroke-dasharray="${dashes[kind]}"` : '';
 
-      svg += `<line data-kind="${kind}" x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${colors[kind]}" stroke-width="${sq * 0.16}" stroke-linecap="round" opacity="0.8" ${dash} marker-end="url(#cc-head-${kind})"/>`;
+      svg += `<line data-kind="${kind}" x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${colors[kind]}" stroke-width="${sq * (width[kind] || 0.16)}" stroke-linecap="round" opacity="${opacity[kind] || 0.8}" ${dash} marker-end="url(#cc-head-${kind})"/>`;
     });
 
     overlay.innerHTML = svg;

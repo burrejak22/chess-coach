@@ -99,3 +99,9 @@ footer { margin-top: 6px; display: grid; gap: 2px; }
 /* inside the page on a phone: a bit tighter, and the header is already shown by the sheet */
 .embedded body { padding: 8px 10px 16px; }
 .embedded header.top .brand { display: none; }
+/* typical move: cyan */
+:root { --typical: #0ea5b7; }
+.typical { border-color: color-mix(in srgb, var(--typical) 45%, var(--line)); }
+.typical .san { color: var(--typical); }
+.sw.typical { background: color-mix(in srgb, var(--typical) 55%, transparent); height: 6px; }
+.small { font-size: 11px; }

@@ -11,6 +11,13 @@ puzzle, or a game vs the computer, and the side panel shows:
   something) that's worse, with why it's tempting and what goes wrong. Only inaccuracies and mistakes
   (0.6 to 2.5 pawns worse) are shown; game-losing blunders and moves that walk into mate aren't. Turn it off with
   the **Mistakes** checkbox.
+- **Typical move** (cyan band, always on): the move most real players would play here, good or bad, with an
+  estimated share of players, why people go for it, and the engine's verdict on it (so you can see when "what
+  everyone plays" is a mistake). It models how players actually choose: take back after a capture, save an attacked
+  piece, grab loose material, checks, the opening moves people know, developing and castling, and what a quick
+  calculation finds, with more calculation the higher the "Play like" level. The shares are an estimate from that
+  model, not game statistics. The band is drawn wide and underneath, so it still shows when it's the same move as
+  another arrow.
 - **Accuracy**: a running score for each side as the game goes (the same idea as Chess.com's and Lichess'
   accuracy: how much of your winning chances each move kept), with a colored square per move and counts of
   best / good / inaccuracies / mistakes / blunders. It follows the line on the board: step back and it shows the
