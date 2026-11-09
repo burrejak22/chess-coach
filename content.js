@@ -16,13 +16,12 @@
   const ROLE = { pawn: 'p', knight: 'n', bishop: 'b', rook: 'r', queen: 'q', king: 'k' };
 
   // ---------------------------------------------------------------------------------------------
-  // page gate: on for study pages, off during live/daily games and unsolved puzzles.
+  // page gate: on for studies, analysis, puzzles and all games (live or finished).
   // Anything not recognised stays off, so a site redesign fails safe.
   // ---------------------------------------------------------------------------------------------
 
   const on = (site, mode) => ({ site, allowed: true, mode });
   const off = (site, reason) => ({ site, allowed: false, reason });
-  const LIVE = 'Live game in progress. The coach turns back on when the game ends.';
 
   const lichessGate = (doc, path) => {
     const site = 'Lichess';
@@ -40,33 +39,15 @@
     }
 
     if (/^\/training(\/|$)/.test(path)) {
-      // after a puzzle is finished Lichess shows the "after" feedback / vote panel
-      return doc.querySelector('.puzzle__feedback.after, .puzzle__vote')
-        ? on(site, 'Solved puzzle')
-        : off(site, 'Puzzle not solved yet. Solve it first, then the coach turns on.');
+      return on(site, 'Puzzle');
     }
 
     // game pages: /<8 or 12 char id>, optionally /white or /black
     if (/^\/[A-Za-z0-9]{8}(?:[A-Za-z0-9]{4})?(?:\/(?:white|black))?\/?$/.test(path)) {
-      if (doc.querySelector('.rclock.running')) {
-        return off(site, LIVE);
-      }
-
-      if (doc.querySelector('.result-wrap')) {
-        return on(site, 'Finished game');
-      }
-
-      // Lichess usernames can't contain spaces, so "Stockfish level N" is the built-in AI
-      const players = [...doc.querySelectorAll('.ruser, .ruser-top, .ruser-bottom')].map((e) => e.textContent).join(' ');
-
-      if (/Stockfish level \d/i.test(players)) {
-        return on(site, 'Vs computer');
-      }
-
-      return off(site, LIVE);
+      return on(site, 'Game');
     }
 
-    return off(site, 'Open an analysis board, a study, a finished game or a solved puzzle.');
+    return off(site, 'Open an analysis board, a study, or a game.');
   };
 
   const chessComGate = (doc, path) => {
@@ -81,26 +62,18 @@
     }
 
     if (/^\/(puzzles?|daily-chess-puzzle|puzzle-rush|puzzle-battle)(\/|$)/.test(path)) {
-      return off(site, 'Puzzles are off. Use Lichess puzzles (on once solved) or an analysis board.');
+      return on(site, 'Puzzle');
     }
 
     if (/^\/game\//.test(path)) {
-      if (doc.querySelector('.clock-player-turn')) {
-        return off(site, LIVE);
-      }
-
-      if (doc.querySelector('.game-over-modal-content, .game-over-header-component, .game-over-buttons-component')) {
-        return on(site, 'Finished game');
-      }
-
-      return off(site, LIVE);
+      return on(site, 'Game');
     }
 
     if (/^\/(play|live|daily)(\/|$)/.test(path)) {
-      return off(site, LIVE);
+      return on(site, 'Game');
     }
 
-    return off(site, 'Open an analysis board, a finished game, or a game vs the computer.');
+    return off(site, 'Open an analysis board, a puzzle, or a game.');
   };
 
   const gate = (doc = document, loc = location) => {
@@ -178,6 +151,10 @@
         moving = true;
       }
 
+      if (cls.contains('anim')) {
+        return;
+      }
+
       if (cls.contains('ghost') || cls.contains('fading') || cls.contains('dragging')) {
         return;
       }
@@ -214,6 +191,7 @@
       }
 
       const file = parseInt(cls[7], 10) - 1;
+
       const rank = parseInt(cls[8], 10);
 
       return file >= 0 && file < 8 && rank >= 1 && rank <= 8 ? `${FILES[file]}${rank}` : null;
@@ -499,7 +477,7 @@
     ui.sheet.dataset.size = sheetSize;
     // the button only shows where the coach can run, so it never sits on a live game
     ui.launcher.hidden = sheetSize !== 'closed' || !currentGate.allowed;
-    ui.full.textContent = sheetSize === 'full' ? '▾' : '▴';
+    ui.full.textContent = sheetSize === 'full' ? 'â¾' : 'â´';
     ui.full.setAttribute('aria-label', sheetSize === 'full' ? 'Smaller' : 'Bigger');
   };
 
@@ -525,13 +503,13 @@
     const root = host.attachShadow({ mode: 'closed' });
 
     root.innerHTML = `<style>${SHEET_CSS}</style>
-      <button type="button" class="launcher" aria-label="Open Chess Coach" hidden>♞</button>
+      <button type="button" class="launcher" aria-label="Open Chess Coach" hidden>â¢</button>
       <div class="sheet" hidden>
         <div class="bar">
           <button type="button" class="title">Chess Coach</button>
-          <button type="button" class="full" aria-label="Bigger">▴</button>
-          <button type="button" class="min" aria-label="Minimize">–</button>
-          <button type="button" class="close" aria-label="Close">✕</button>
+          <button type="button" class="full" aria-label="Bigger">â´</button>
+          <button type="button" class="min" aria-label="Minimize">â</button>
+          <button type="button" class="close" aria-label="Close">â</button>
         </div>
         <iframe title="Chess Coach"></iframe>
       </div>`;
