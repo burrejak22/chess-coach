@@ -25,6 +25,7 @@ import {
 import { bookMoves, detectOpening } from './lib/openings.js';
 import { planFor } from './lib/opening-plans.js';
 import { mountOpenings } from './openings-ui.js';
+import { Chess } from './lib/chess.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -493,12 +494,26 @@ const sendArrows = (result) => {
     }
 
     // pre-move arrow: the move you can safely queue up, from the card that's the user's pick
-    // (human move if it exists, otherwise engine best). Only draw strong or conditional pre-
-    // moves, not 'weak' ones (those depend on the opponent playing the engine's expected reply).
+    // (human move if it exists, otherwise engine best). Only draw when:
+    //   1. confidence is strong or conditional (not weak — those depend on the opponent
+    //      playing the engine's expected reply and would be a misleading pre-move cue)
+    //   2. the pre-move's FROM square currently holds a piece of the mover's color on the
+    //      actual board. Without this check we'd draw arrows from squares where our piece
+    //      only lives AFTER our own candidate move (e.g., Rxa7 then Rxh7 — the rook isn't on
+    //      a7 yet, so showing an arrow from a7 is confusing).
     const primaryCard = result.human || result.best;
     const pm = primaryCard?.premove;
-    if (pm && (pm.confidence === 'strong' || pm.confidence === 'conditional')) {
-      arrows.push({ from: pm.uci.slice(0, 2), to: pm.uci.slice(2, 4), kind: 'premove' });
+    if (pm && (pm.confidence === 'strong' || pm.confidence === 'conditional') && state.fen) {
+      const fromSq = pm.uci.slice(0, 2);
+      let ourPieceOnFromSq = false;
+      try {
+        const chess = new Chess(state.fen);
+        const piece = chess.get(fromSq);
+        ourPieceOnFromSq = !!piece && piece.color === result.turn;
+      } catch { /* ignore */ }
+      if (ourPieceOnFromSq) {
+        arrows.push({ from: fromSq, to: pm.uci.slice(2, 4), kind: 'premove' });
+      }
     }
 
     if (result.threat) {
