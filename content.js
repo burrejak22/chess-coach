@@ -314,10 +314,10 @@ const off = (site, reason) => ({ site, allowed: false, reason });
     };
 
     // green = human move, blue = engine best, orange dotted = tempting mistake, red dashed = their threat
-    const colors = { human: '#2e9e5b', best: '#2f6fd6', mistake: '#8b5cf6', threat: '#d64545', brilliant: '#d4a017', typical: '#0ea5b7' };
-    const dashes = { threat: `${sq * 0.2} ${sq * 0.15}`, mistake: `${sq * 0.01} ${sq * 0.24}` };
+    const colors = { human: '#2e9e5b', best: '#2f6fd6', mistake: '#8b5cf6', threat: '#d64545', brilliant: '#d4a017', typical: '#0ea5b7', premove: '#ec4899' };
+    const dashes = { threat: `${sq * 0.2} ${sq * 0.15}`, mistake: `${sq * 0.01} ${sq * 0.24}`, premove: `${sq * 0.32} ${sq * 0.18}` };
     // later arrows are drawn on top: the move we recommend should never be hidden by the others
-    const layer = { typical: -1, mistake: 0, threat: 1, best: 2, human: 3, brilliant: 4 };
+    const layer = { typical: -1, mistake: 0, premove: 1, threat: 1, best: 2, human: 3, brilliant: 4 };
     // the typical move is a wide see-through band under everything, so it still shows when it's the same
     // move as another arrow
     const width = { typical: 0.38 };

@@ -492,6 +492,15 @@ const sendArrows = (result) => {
       arrows.push({ from: result.typical.from, to: result.typical.to, kind: 'typical' });
     }
 
+    // pre-move arrow: the move you can safely queue up, from the card that's the user's pick
+    // (human move if it exists, otherwise engine best). Only draw strong or conditional pre-
+    // moves, not 'weak' ones (those depend on the opponent playing the engine's expected reply).
+    const primaryCard = result.human || result.best;
+    const pm = primaryCard?.premove;
+    if (pm && (pm.confidence === 'strong' || pm.confidence === 'conditional')) {
+      arrows.push({ from: pm.uci.slice(0, 2), to: pm.uci.slice(2, 4), kind: 'premove' });
+    }
+
     if (result.threat) {
       arrows.push({ from: result.threat.from, to: result.threat.to, kind: 'threat' });
     }
