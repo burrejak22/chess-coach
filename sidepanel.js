@@ -603,11 +603,13 @@ const analyzeFen = async (fen) => {
   sendArrows(null); // the old position's arrows would point at the wrong pieces
 
   // 1) quick look so something shows up right away
-  let shallow = await engine.analyze(fen, { multipv: 5, depth: 6 });
+  // quick first pass: depth 4 gets the engine's top move + a usable PV in ~50-150ms, so the
+  // arrows (including pink pre-move) appear fast. The deep search below still refines them.
+  let shallow = await engine.analyze(fen, { multipv: 5, depth: 4 });
 
   // the engine was restarted mid-search: give the position one more try
   if (!stale() && !shallow?.length) {
-    shallow = await engine.analyze(fen, { multipv: 5, depth: 6 });
+    shallow = await engine.analyze(fen, { multipv: 5, depth: 4 });
   }
 
   if (stale()) {
@@ -762,6 +764,13 @@ const onBoard = (message) => {
 
   if (message?.fen) {
     message = { ...message, fen: resolveTurn(message, state.fen, state.settings.turn) };
+  }
+
+  // While a piece is literally being dragged, DOM states are transient (the dragged piece is
+  // detached from its square, ghost placeholders appear). Hold the current analysis instead of
+  // thrashing arrows and re-running the engine on a position that isn't the real move.
+  if (message.moving && state.fen) {
+    return;
   }
 
   state.gate = message.gate;
