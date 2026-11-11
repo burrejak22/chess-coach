@@ -561,13 +561,16 @@ const analyzeFen = async (fen) => {
   const cached = state.cache.get(key);
   const level = Number(state.settings.level);
 
-  const show = (data, thinking) => {
+  // `arrows: false` lets us render the side-panel text (fast feedback) without drawing on the
+  // board yet — we skip arrows during the shallow pass to avoid the flicker where the shallow
+  // search's top move gets corrected by the deep search a second later.
+  const show = (data, thinking, { arrows = true } = {}) => {
     const result = coachPosition(fen, { ...data, level });
 
     state.lastResult = { fen, data };
     renderEval(result, thinking);
     renderMoves(result);
-    sendArrows(result);
+    if (arrows) sendArrows(result);
 
     return result;
   };
@@ -657,7 +660,9 @@ const analyzeFen = async (fen) => {
   }
 
   picks = typicalMoves(fen, { shallowLines: shallow, level, lastMove, book: bookMoves(fen) });
-  show({ deep: shallow, shallow, typical: typicalFrom() }, 'thinking…');
+  // text only — no arrows yet. Deep search will replace this with the real picks and only then
+  // do we touch the board overlay.
+  show({ deep: shallow, shallow, typical: typicalFrom() }, 'thinking…', { arrows: false });
 
   // 2) what are they threatening if it were their move?
   const nf = nullMoveFen(fen);
