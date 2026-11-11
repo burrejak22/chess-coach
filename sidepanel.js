@@ -544,6 +544,13 @@ const sendArrows = (result) => {
     }
   }
 
+  // Dedupe: identical arrow set (same squares and kinds in the same order) = no-op. This lets
+  // the shallow + deep passes both call sendArrows without flicker when they agree (the common
+  // case). Only genuine changes repaint the overlay.
+  const sig = `${state.fen || ''}|${arrows.map((a) => `${a.kind}:${a.from}-${a.to}`).join(',')}`;
+  if (sig === state._lastArrowSig) return;
+  state._lastArrowSig = sig;
+
   tabSend({ type: 'cc:arrows', arrows }).catch(() => {});
 };
 
@@ -561,16 +568,17 @@ const analyzeFen = async (fen) => {
   const cached = state.cache.get(key);
   const level = Number(state.settings.level);
 
-  // `arrows: false` lets us render the side-panel text (fast feedback) without drawing on the
-  // board yet — we skip arrows during the shallow pass to avoid the flicker where the shallow
-  // search's top move gets corrected by the deep search a second later.
-  const show = (data, thinking, { arrows = true } = {}) => {
+  const show = (data, thinking) => {
     const result = coachPosition(fen, { ...data, level });
 
     state.lastResult = { fen, data };
     renderEval(result, thinking);
     renderMoves(result);
-    if (arrows) sendArrows(result);
+    // sendArrows dedupes internally: if the arrow set is identical to what's already on the
+    // board, it's a no-op. That lets us call show() on both shallow and deep passes without
+    // flicker: when the two agree (usual case) the board doesn't repaint; when they disagree
+    // (tactical positions) the arrows legitimately update.
+    sendArrows(result);
 
     return result;
   };
@@ -660,9 +668,9 @@ const analyzeFen = async (fen) => {
   }
 
   picks = typicalMoves(fen, { shallowLines: shallow, level, lastMove, book: bookMoves(fen) });
-  // text only — no arrows yet. Deep search will replace this with the real picks and only then
-  // do we touch the board overlay.
-  show({ deep: shallow, shallow, typical: typicalFrom() }, 'thinking…', { arrows: false });
+  // shallow arrows show immediately. Blitz games need the feedback fast; the deep pass later
+  // only re-draws if the arrow set actually changed (handled inside sendArrows / content.js).
+  show({ deep: shallow, shallow, typical: typicalFrom() }, 'thinking…');
 
   // 2) what are they threatening if it were their move?
   const nf = nullMoveFen(fen);
