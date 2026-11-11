@@ -493,26 +493,45 @@ const sendArrows = (result) => {
       arrows.push({ from: result.typical.from, to: result.typical.to, kind: 'typical' });
     }
 
-    // pre-move arrow: the move you can safely queue up, from the card that's the user's pick
-    // (human move if it exists, otherwise engine best). Only draw when:
-    //   1. confidence is strong or conditional (not weak — those depend on the opponent
-    //      playing the engine's expected reply and would be a misleading pre-move cue)
-    //   2. the pre-move's FROM square currently holds a piece of the mover's color on the
-    //      actual board. Without this check we'd draw arrows from squares where our piece
-    //      only lives AFTER our own candidate move (e.g., Rxa7 then Rxh7 — the rook isn't on
-    //      a7 yet, so showing an arrow from a7 is confusing).
+    // pre-move arrow: the move you can safely queue up on the site. Two cases:
+    //
+    //   A) It's YOUR turn to move: the pre-move is the follow-up you'd play AFTER your current
+    //      move and their reply. We only draw this arrow when your piece is already sitting on
+    //      the pre-move's from-square (otherwise it looks like an arrow from the wrong piece).
+    //
+    //   B) It's the OPPONENT'S turn: this is the main case the user asked for. The engine's
+    //      best reply to the opponent's expected move is pv[1] of the best line. Queue THAT as
+    //      your pre-move while they're thinking.
+    //
+    // Which case we're in is decided by comparing board orientation (your side) to the side to
+    // move. When orientation isn't known (yet), we fall back to case A.
+    const userColor = state.orientation?.[0];
+    const opponentsTurn = userColor && result.turn && result.turn !== userColor;
     const primaryCard = result.human || result.best;
-    const pm = primaryCard?.premove;
-    if (pm && (pm.confidence === 'strong' || pm.confidence === 'conditional') && state.fen) {
-      const fromSq = pm.uci.slice(0, 2);
-      let ourPieceOnFromSq = false;
+
+    const drawPremoveArrow = (uci) => {
+      if (!uci || uci.length < 4 || !state.fen) return;
+      const fromSq = uci.slice(0, 2);
       try {
         const chess = new Chess(state.fen);
         const piece = chess.get(fromSq);
-        ourPieceOnFromSq = !!piece && piece.color === result.turn;
+        // our color = whichever color's move this is (userColor if known, else turn)
+        const ourColor = userColor || result.turn;
+        if (piece && piece.color === ourColor) {
+          arrows.push({ from: fromSq, to: uci.slice(2, 4), kind: 'premove' });
+        }
       } catch { /* ignore */ }
-      if (ourPieceOnFromSq) {
-        arrows.push({ from: fromSq, to: pm.uci.slice(2, 4), kind: 'premove' });
+    };
+
+    if (opponentsTurn) {
+      // best line pv[1] = our engine-best response to the opponent's expected move
+      const userResponseUci = (result.best?.pv || [])[1];
+      drawPremoveArrow(userResponseUci);
+    } else {
+      // our turn: use the safe pre-move computed against opponent's likely replies
+      const pm = primaryCard?.premove;
+      if (pm && (pm.confidence === 'strong' || pm.confidence === 'conditional')) {
+        drawPremoveArrow(pm.uci);
       }
     }
 
