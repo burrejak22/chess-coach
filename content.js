@@ -620,8 +620,28 @@
     timer = setTimeout(() => publish(false), 80);
   };
 
-  new MutationObserver(schedule).observe(document.documentElement, {
-    subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'],
+  // Observer scope: the board element when we can find one (way fewer mutation records),
+  // document.documentElement as a fallback that catches SPA navigations / board replacements.
+  // Rebinds on a cadence in case the board element gets swapped out by the site's framework.
+  let boardObserver = null;
+  let boardObserverTarget = null;
+
+  const bindBoardObserver = () => {
+    const board = lastRead?.element;
+    if (!board) return;
+    if (board === boardObserverTarget) return;
+    boardObserver?.disconnect();
+    boardObserver = new MutationObserver(schedule);
+    boardObserver.observe(board, {
+      subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'transform'],
+    });
+    boardObserverTarget = board;
+  };
+
+  // A lightweight document-level observer catches board appearance / SPA navigation; cost is
+  // minimal because we filter on attributes we actually care about only at the root level.
+  new MutationObserver(() => { schedule(); bindBoardObserver(); }).observe(document.documentElement, {
+    childList: true, subtree: true, attributes: false,
   });
 
   window.addEventListener('resize', drawArrows);
