@@ -23,6 +23,7 @@ import {
   temptingReplies,
 } from './lib/coach.js';
 import { bookMoves, detectOpening } from './lib/openings.js';
+import { planFor } from './lib/opening-plans.js';
 import { mountOpenings } from './openings-ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -162,6 +163,33 @@ const BADGE_LABEL = { Brilliant: 'Brilliant!!', Great: 'Great!', 'Only move': 'O
 
 const badges = (card) => (card?.badges || []).map((b) => el('span', { class: `badge ${b.split(' ')[0]}` }, BADGE_LABEL[b] || b));
 
+// Small "predicted reply + pre-move" block rendered under a move card. Shows the top 1-2
+// opponent responses with their shares, plus the pre-move the user can queue up safely.
+const predictionBlock = (card) => {
+  if (!card?.replies?.length) return null;
+  const shareLabel = (share) => `${Math.max(1, Math.round(share * 100))}%`;
+  const children = [];
+  const replyBits = card.replies.map((r, i) => [
+    i ? ', ' : '',
+    el('b', {}, r.san),
+    ` (${shareLabel(r.share)})`,
+  ]);
+  children.push(el('div', { class: 'plan muted small' }, 'They probably play: ', replyBits));
+
+  if (card.premove) {
+    const level = card.premove.confidence;
+    const label = level === 'strong' ? 'Safe pre-move: '
+      : level === 'conditional' ? 'Likely-safe pre-move: '
+        : 'Pre-move (only if they play the expected reply): ';
+    children.push(el('div', { class: 'plan muted small' },
+      label,
+      el('b', {}, card.premove.san),
+      card.premove.note ? el('span', { class: 'muted' }, ` (${card.premove.note})`) : null,
+    ));
+  }
+  return children;
+};
+
 const renderOpening = () => {
   const hit = state.fen ? detectOpening(state.fen) : null;
 
@@ -171,6 +199,8 @@ const renderOpening = () => {
     return;
   }
 
+  const plan = planFor(hit.opening.name);
+
   fill(
     'opening',
     el('h3', {}, 'Opening'),
@@ -178,6 +208,7 @@ const renderOpening = () => {
     hit.next
       ? el('div', { class: 'plan' }, 'Book move: ', el('b', {}, hit.next), hit.note ? `: ${hit.note}` : '')
       : el('div', { class: 'plan' }, 'End of the book line. Time for the plans.'),
+    plan ? el('div', { class: 'plan muted' }, el('b', {}, 'Plan: '), plan) : null,
     el('div', { class: 'btnrow' }, el('button', { type: 'button', class: 'btn', onclick: () => { showTab('openings'); openings.open(hit.opening.id); } }, 'Learn this opening')),
   );
 };
@@ -239,6 +270,7 @@ const renderMoves = (result) => {
       ),
       list(human.reasons),
       human.plan?.length ? el('div', { class: 'plan' }, 'Plan: ', el('b', {}, human.plan.join(' → '))) : null,
+      predictionBlock(human),
     );
   }
 
@@ -247,6 +279,7 @@ const renderMoves = (result) => {
     el('div', { class: 'move' }, el('span', { class: 'san' }, best.san), badges(best), el('span', { class: 'tag' }, best.eval)),
     list(best.reasons),
     best.plan?.length ? el('div', { class: 'plan' }, 'Plan: ', el('b', {}, best.plan.join(' → '))) : null,
+    predictionBlock(best),
   ]);
 
   const { typical } = result;

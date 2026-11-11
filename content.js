@@ -25,77 +25,26 @@
   };
 
   // ---------------------------------------------------------------------------------------------
-  // page gate: on for studies, analysis, puzzles and all games (live or finished).
-  // Anything not recognised stays off, so a site redesign fails safe.
-  // ---------------------------------------------------------------------------------------------
+// page gate: ALWAYS ON. The coach stays active on every Lichess / Chess.com page;
+// if no board is present, snapshot simply reports no FEN until one appears.
+// ---------------------------------------------------------------------------------------------
 
-  const on = (site, mode) => ({ site, allowed: true, mode });
-  const off = (site, reason) => ({ site, allowed: false, reason });
+const on = (site, mode) => ({ site, allowed: true, mode });
 
-  const lichessGate = (doc, path) => {
-    const site = 'Lichess';
+const gate = (doc = document, loc = location) => {
+  if (/(^|\.)lichess\.org$/.test(loc.hostname)) {
+    return on('Lichess', 'Any page');
+  }
 
-    if (/^\/analysis(\/|$)/.test(path)) {
-      return on(site, 'Analysis board');
-    }
+  if (/(^|\.)chess\.com$/.test(loc.hostname)) {
+    return on('Chess.com', 'Any page');
+  }
 
-    if (/^\/(study|broadcast)(\/|$)/.test(path)) {
-      return on(site, 'Study');
-    }
+  return off(null, 'This site isn\'t supported yet.');
+};
 
-    if (/^\/editor(\/|$)/.test(path)) {
-      return on(site, 'Board editor');
-    }
+const off = (site, reason) => ({ site, allowed: false, reason });
 
-    if (/^\/training(\/|$)/.test(path)) {
-      return on(site, 'Puzzle');
-    }
-
-    // game pages: /<8 or 12 char id>, optionally /white or /black
-    if (/^\/[A-Za-z0-9]{8}(?:[A-Za-z0-9]{4})?(?:\/(?:white|black))?\/?$/.test(path)) {
-      return on(site, 'Game');
-    }
-
-    return off(site, 'Open an analysis board, a study, or a game.');
-  };
-
-  const chessComGate = (doc, path) => {
-    const site = 'Chess.com';
-
-    if (/^\/(analysis|explorer)(\/|$)/.test(path)) {
-      return on(site, 'Analysis board');
-    }
-
-    if (/^\/play\/computer(\/|$)/.test(path)) {
-      return on(site, 'Vs computer');
-    }
-
-    if (/^\/(puzzles?|daily-chess-puzzle|puzzle-rush|puzzle-battle)(\/|$)/.test(path)) {
-      return on(site, 'Puzzle');
-    }
-
-    if (/^\/game\//.test(path)) {
-      return on(site, 'Game');
-    }
-
-    if (/^\/(play|live|daily)(\/|$)/.test(path)) {
-      return on(site, 'Game');
-    }
-
-    return off(site, 'Open an analysis board, a puzzle, or a game.');
-  };
-
-  const gate = (doc = document, loc = location) => {
-    if (/(^|\.)lichess\.org$/.test(loc.hostname)) {
-      return lichessGate(doc, loc.pathname);
-    }
-
-    if (/(^|\.)chess\.com$/.test(loc.hostname)) {
-      return chessComGate(doc, loc.pathname);
-    }
-
-    return off(null, 'This site isn\'t supported yet.');
-  };
 
   // ---------------------------------------------------------------------------------------------
   // board readers
@@ -620,8 +569,28 @@
     timer = setTimeout(() => publish(false), 80);
   };
 
-  new MutationObserver(schedule).observe(document.documentElement, {
-    subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'],
+  // Observer scope: the board element when we can find one (way fewer mutation records),
+  // document.documentElement as a fallback that catches SPA navigations / board replacements.
+  // Rebinds on a cadence in case the board element gets swapped out by the site's framework.
+  let boardObserver = null;
+  let boardObserverTarget = null;
+
+  const bindBoardObserver = () => {
+    const board = lastRead?.element;
+    if (!board) return;
+    if (board === boardObserverTarget) return;
+    boardObserver?.disconnect();
+    boardObserver = new MutationObserver(schedule);
+    boardObserver.observe(board, {
+      subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'transform'],
+    });
+    boardObserverTarget = board;
+  };
+
+  // A lightweight document-level observer catches board appearance / SPA navigation; cost is
+  // minimal because we filter on attributes we actually care about only at the root level.
+  new MutationObserver(() => { schedule(); bindBoardObserver(); }).observe(document.documentElement, {
+    childList: true, subtree: true, attributes: false,
   });
 
   window.addEventListener('resize', drawArrows);
