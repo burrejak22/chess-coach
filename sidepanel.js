@@ -23,6 +23,7 @@ import {
   temptingReplies,
 } from './lib/coach.js';
 import { bookMoves, detectOpening } from './lib/openings.js';
+import { planFor } from './lib/opening-plans.js';
 import { mountOpenings } from './openings-ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -171,6 +172,8 @@ const renderOpening = () => {
     return;
   }
 
+  const plan = planFor(hit.opening.name);
+
   fill(
     'opening',
     el('h3', {}, 'Opening'),
@@ -178,6 +181,7 @@ const renderOpening = () => {
     hit.next
       ? el('div', { class: 'plan' }, 'Book move: ', el('b', {}, hit.next), hit.note ? `: ${hit.note}` : '')
       : el('div', { class: 'plan' }, 'End of the book line. Time for the plans.'),
+    plan ? el('div', { class: 'plan muted' }, el('b', {}, 'Plan: '), plan) : null,
     el('div', { class: 'btnrow' }, el('button', { type: 'button', class: 'btn', onclick: () => { showTab('openings'); openings.open(hit.opening.id); } }, 'Learn this opening')),
   );
 };
